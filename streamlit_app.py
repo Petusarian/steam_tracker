@@ -10,6 +10,7 @@ import time
 
 # === CONFIGURATION ===
 SPREADSHEET_NAME = 'STEAM_TRACKER'
+# Use Streamlit secrets for service account credentials
 SERVICE_ACCOUNT_INFO = st.secrets["gcp_service_account"]
 SERVICE_ACCOUNT_SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
@@ -65,27 +66,31 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=300)
 def load_steam_data():
     """Load Steam game data from Google Sheets with caching."""
     try:
+        # Copy and normalize secrets for jwt
+        svc_info = SERVICE_ACCOUNT_INFO.copy()
+        # Ensure private_key newlines are correct for JWT
+        if isinstance(svc_info.get('private_key'), str):
+            svc_info['private_key'] = svc_info['private_key'].replace('\\n', '\n')
+        # Create credentials from info
         creds = Credentials.from_service_account_info(
-            SERVICE_ACCOUNT_INFO,
+            svc_info,
             scopes=SERVICE_ACCOUNT_SCOPES
         )
         client = gspread.authorize(creds)
         sheet = client.open(SPREADSHEET_NAME)
-        
-        # Load the master data
+
         try:
             master_sheet = sheet.worksheet('Steam_Master')
             data = master_sheet.get_all_records()
             df = pd.DataFrame(data)
-            
             if df.empty:
                 st.warning("No data found in the Steam_Master sheet.")
                 return pd.DataFrame()
-            
+
             # Convert data types
             if 'AppID' in df.columns:
                 df['AppID'] = pd.to_numeric(df['AppID'], errors='coerce')
@@ -93,19 +98,14 @@ def load_steam_data():
                 df['ReleaseDate'] = pd.to_datetime(df['ReleaseDate'], errors='coerce')
             if 'DateAdded' in df.columns:
                 df['DateAdded'] = pd.to_datetime(df['DateAdded'], errors='coerce')
-            
             # Convert boolean fields
-            boolean_fields = ['Demo', 'IsDemo']
-            for field in boolean_fields:
+            for field in ['Demo', 'IsDemo']:
                 if field in df.columns:
-                    df[field] = df[field].astype(str).str.lower().isin(['true', '1', 'yes', 'True', 'TRUE'])
-            
+                    df[field] = df[field].astype(str).str.lower().isin(['true','1','yes'])
             return df
-            
         except gspread.WorksheetNotFound:
-            st.error("Steam_Master worksheet not found. Please run the steam_tracker.py script first.")
+            st.error("Steam_Master worksheet not found. Please run the data script first.")
             return pd.DataFrame()
-            
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return pd.DataFrame()
