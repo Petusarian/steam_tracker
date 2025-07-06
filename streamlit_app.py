@@ -131,7 +131,7 @@ def load_steam_data():
             if 'DateAdded' in df.columns:
                 df['DateAdded'] = pd.to_datetime(df['DateAdded'], errors='coerce')
             # Convert boolean fields
-            for field in ['Demo', 'IsDemo']:
+            for field in ['Demo', 'IsDemo', 'IsComingSoon', 'IsPlaceholderDate']:
                 if field in df.columns:
                     df[field] = df[field].astype(str).str.lower().isin(['true','1','yes'])
             return df
@@ -381,6 +381,50 @@ def get_demo_status(game):
     
     return status
 
+
+def get_release_status_display(game):
+    """Get enhanced release status display information for a game."""
+    release_status = game.get('ReleaseStatus', 'unknown')
+    is_coming_soon = game.get('IsComingSoon', False)
+    is_placeholder = game.get('IsPlaceholderDate', False)
+    release_date = game.get('ReleaseDate', 'Unknown')
+    
+    # Map release status to display information
+    if release_status == 'released':
+        return {
+            'status_text': 'Released',
+            'status_emoji': '✅',
+            'status_color': 'green',
+            'date_text': release_date,
+            'badge_text': '✅ Released'
+        }
+    elif release_status == 'coming_soon':
+        prefix = '~' if is_placeholder else ''
+        return {
+            'status_text': 'Coming Soon',
+            'status_emoji': '🔜',
+            'status_color': 'orange',
+            'date_text': f"{prefix}{release_date}",
+            'badge_text': '🔜 Coming Soon'
+        }
+    elif release_status == 'distant_future':
+        prefix = '~' if is_placeholder else ''
+        return {
+            'status_text': 'Distant Future',
+            'status_emoji': '🔮',
+            'status_color': 'blue',
+            'date_text': f"{prefix}{release_date}",
+            'badge_text': '🔮 Distant Future'
+        }
+    else:
+        return {
+            'status_text': 'Unknown',
+            'status_emoji': '❓',
+            'status_color': 'gray',
+            'date_text': release_date,
+            'badge_text': '❓ Unknown'
+        }
+
 def display_game_card(game):
     """Display a detailed game card with enhanced layout and interactive elements."""
     with st.container():
@@ -550,11 +594,18 @@ def main():
         help="Filter by demo availability"
     )
     
+    # Release status filter
+    release_status_filter = st.sidebar.selectbox(
+        "🚀 Release Status",
+        ["All", "Released", "Coming Soon", "Distant Future"],
+        help="Filter by release status"
+    )
+    
     # Sort options
     st.sidebar.subheader("🔄 Sort Options")
     sort_option = st.sidebar.selectbox(
         "Sort By",
-        ["Date Added (Newest First)", "Date Added (Oldest First)", "Name (A-Z)", "Name (Z-A)"],
+        ["Date Added (Newest First)", "Date Added (Oldest First)", "Name (A-Z)", "Name (Z-A)", "Release Status"],
         help="Choose how to sort the results"
     )
     
@@ -575,12 +626,24 @@ def main():
         for tag in selected_tags:
             mask = filtered_df['CommunityTags'].astype(str).str.contains(tag, case=False, na=False, regex=False)
             tag_mask = tag_mask | mask
-        filtered_df = filtered_df[tag_mask].copy()
+        filtered_df = filtered_df.loc[tag_mask].copy()
     
     # Demo filter
     if demo_filter == "Has Demo":
         demo_mask = (filtered_df['Demo'] == True) | (filtered_df['IsDemo'] == True)
-        filtered_df = filtered_df[demo_mask].copy()
+        filtered_df = filtered_df.loc[demo_mask].copy()
+    
+    # Release status filter
+    if release_status_filter != "All" and 'ReleaseStatus' in filtered_df.columns:
+        status_map = {
+            "Released": "released",
+            "Coming Soon": "coming_soon", 
+            "Distant Future": "distant_future"
+        }
+        target_status = status_map.get(release_status_filter)
+        if target_status:
+            status_mask = filtered_df['ReleaseStatus'].astype(str).str.lower() == target_status
+            filtered_df = filtered_df.loc[status_mask].copy()
     
     # Apply sorting
     if not filtered_df.empty:
@@ -593,6 +656,13 @@ def main():
             filtered_df = filtered_df.sort_values('Name', ascending=True)
         elif sort_option == "Name (Z-A)":
             filtered_df = filtered_df.sort_values('Name', ascending=False)
+        elif sort_option == "Release Status":
+            # Sort by release status (released first, then coming soon, then distant future)
+            status_order = {'released': 0, 'coming_soon': 1, 'distant_future': 2, 'unknown': 3}
+            if 'ReleaseStatus' in filtered_df.columns:
+                filtered_df['_sort_order'] = filtered_df['ReleaseStatus'].apply(lambda x: status_order.get(x, 3))
+                filtered_df = filtered_df.sort_values(['_sort_order', 'Name'], ascending=[True, True])
+                filtered_df = filtered_df.drop('_sort_order', axis=1)
     
     # Display results
     st.header(f"📊 Results ({len(filtered_df)} games)")
@@ -645,11 +715,17 @@ def main():
                     if support_url is not None and str(support_url).strip():
                         st.link_button("🌐 Dev URL", str(support_url))
 
-                # Slot 3: Demo Status
+                # Slot 3: Release Status
                 with info_cols[2]:
-                    demo_status = get_demo_status(game)
-                    if demo_status['has_demo']:
-                        st.info("🎯 Demo")
+                    release_display = get_release_status_display(game)
+                    if release_display['status_color'] == 'green':
+                        st.success(release_display['badge_text'])
+                    elif release_display['status_color'] == 'orange':
+                        st.warning(release_display['badge_text'])
+                    elif release_display['status_color'] == 'blue':
+                        st.info(release_display['badge_text'])
+                    else:
+                        st.info(release_display['badge_text'])
                 
                 # Description
                 short_desc = game.get('ShortDescription')
@@ -665,6 +741,17 @@ def main():
                 if date_added is not None:
                     date_added_str = f"📅 Added: {format_date_added(date_added)}"
                     date_parts.append(date_added_str)
+                
+                # Add release date information
+                release_display = get_release_status_display(game)
+                if release_display['date_text'] != 'Unknown':
+                    release_date_str = f"{release_display['status_emoji']} {release_display['date_text']}"
+                    date_parts.append(release_date_str)
+                
+                # Add demo status
+                demo_status = get_demo_status(game)
+                if demo_status['has_demo']:
+                    date_parts.append("🎯 Demo Available")
                 
                 if date_parts:
                     st.caption(" &nbsp; • &nbsp; ".join(date_parts), unsafe_allow_html=True)
@@ -766,6 +853,17 @@ def main():
         # Demo availability
         demo_count = len(filtered_df[(filtered_df['Demo'] == True) | (filtered_df['IsDemo'] == True)])
         st.write(f"**Games with Demo:** {demo_count}")
+        
+        # Release status breakdown
+        if 'ReleaseStatus' in filtered_df.columns:
+            st.write("**Release Status:**")
+            released_count = len(filtered_df[filtered_df['ReleaseStatus'] == 'released'])
+            coming_soon_count = len(filtered_df[filtered_df['ReleaseStatus'] == 'coming_soon'])
+            distant_future_count = len(filtered_df[filtered_df['ReleaseStatus'] == 'distant_future'])
+            
+            st.write(f"- ✅ Released: {released_count}")
+            st.write(f"- 🔜 Coming Soon: {coming_soon_count}")
+            st.write(f"- 🔮 Distant Future: {distant_future_count}")
 
 if __name__ == "__main__":
     main()
