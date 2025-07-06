@@ -70,11 +70,37 @@ st.markdown("""
 def load_steam_data():
     """Load Steam game data from Google Sheets with caching."""
     try:
-        # Copy and normalize secrets for jwt
-        svc_info = dict(SERVICE_ACCOUNT_INFO)  # Convert SecretsDict to a regular dict
+        # Fix for Streamlit Community Cloud - properly handle service account credentials
+        
+        # Try to load as JSON string first (alternative method)
+        if isinstance(SERVICE_ACCOUNT_INFO, str):
+            try:
+                svc_info = json.loads(SERVICE_ACCOUNT_INFO)
+            except json.JSONDecodeError:
+                st.error("Invalid JSON format in service account credentials")
+                return pd.DataFrame()
+        else:
+            # Load as dict (original method)
+            svc_info = dict(SERVICE_ACCOUNT_INFO)  # Convert SecretsDict to a regular dict
+        
         # Ensure private_key newlines are correct for JWT
         if isinstance(svc_info.get('private_key'), str):
-            svc_info['private_key'] = svc_info['private_key'].replace('\\n', '\n')
+            private_key = svc_info['private_key']
+            # Handle multiple possible newline formats
+            if '\\n' in private_key:
+                private_key = private_key.replace('\\n', '\n')
+            # Ensure proper BEGIN/END formatting
+            if not private_key.startswith('-----BEGIN PRIVATE KEY-----'):
+                # Remove any accidental prefix characters
+                private_key = private_key.strip()
+            svc_info['private_key'] = private_key
+        
+        # Ensure all required fields are strings
+        required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email', 'client_id']
+        for field in required_fields:
+            if field in svc_info:
+                svc_info[field] = str(svc_info[field])
+        
         # Create credentials from info
         creds = Credentials.from_service_account_info(
             svc_info,
