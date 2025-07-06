@@ -71,7 +71,7 @@ def load_steam_data():
     """Load Steam game data from Google Sheets with caching."""
     try:
         # Copy and normalize secrets for jwt
-        svc_info = SERVICE_ACCOUNT_INFO.copy()
+        svc_info = dict(SERVICE_ACCOUNT_INFO)  # Convert SecretsDict to a regular dict
         # Ensure private_key newlines are correct for JWT
         if isinstance(svc_info.get('private_key'), str):
             svc_info['private_key'] = svc_info['private_key'].replace('\\n', '\n')
