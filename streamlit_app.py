@@ -72,16 +72,28 @@ def load_steam_data():
     try:
         # Fix for Streamlit Community Cloud - properly handle service account credentials
         
+        # Debug: Show what type of credentials we're working with
+        st.write(f"🔍 Debug: SERVICE_ACCOUNT_INFO type: {type(SERVICE_ACCOUNT_INFO)}")
+        
         # Try to load as JSON string first (alternative method)
         if isinstance(SERVICE_ACCOUNT_INFO, str):
             try:
                 svc_info = json.loads(SERVICE_ACCOUNT_INFO)
+                st.write("✅ Debug: Successfully parsed JSON string credentials")
             except json.JSONDecodeError:
                 st.error("Invalid JSON format in service account credentials")
                 return pd.DataFrame()
         else:
             # Load as dict (original method)
             svc_info = dict(SERVICE_ACCOUNT_INFO)  # Convert SecretsDict to a regular dict
+            st.write("✅ Debug: Using dict-based credentials")
+        
+        # Debug: Check if we have the required fields
+        required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email', 'client_id']
+        missing_fields = [field for field in required_fields if field not in svc_info]
+        if missing_fields:
+            st.error(f"Missing required fields: {missing_fields}")
+            return pd.DataFrame()
         
         # Ensure private_key newlines are correct for JWT
         if isinstance(svc_info.get('private_key'), str):
@@ -94,9 +106,9 @@ def load_steam_data():
                 # Remove any accidental prefix characters
                 private_key = private_key.strip()
             svc_info['private_key'] = private_key
+            st.write("✅ Debug: Private key formatting corrected")
         
         # Ensure all required fields are strings
-        required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email', 'client_id']
         for field in required_fields:
             if field in svc_info:
                 svc_info[field] = str(svc_info[field])
@@ -106,8 +118,13 @@ def load_steam_data():
             svc_info,
             scopes=SERVICE_ACCOUNT_SCOPES
         )
+        st.write("✅ Debug: Credentials created successfully")
+        
         client = gspread.authorize(creds)
+        st.write("✅ Debug: gspread client authorized")
+        
         sheet = client.open(SPREADSHEET_NAME)
+        st.write("✅ Debug: Spreadsheet opened successfully")
 
         try:
             master_sheet = sheet.worksheet('Steam_Master')
@@ -134,6 +151,9 @@ def load_steam_data():
             return pd.DataFrame()
     except Exception as e:
         st.error(f"Error loading data: {e}")
+        # Show more detailed error information
+        import traceback
+        st.error(f"Detailed error: {traceback.format_exc()}")
         return pd.DataFrame()
 
 def create_description_search_text(row):
@@ -510,7 +530,7 @@ def main():
     
     # Initialize session state for infinite scroll
     if 'games_shown' not in st.session_state:
-        st.session_state.games_shown = 10
+        st.session_state.games_shown = 20
     
     # Load data
     df = load_steam_data()
@@ -522,9 +542,6 @@ def main():
     # Sidebar filters
     st.sidebar.header("🔍 Filters")
     
-    # View mode selector
-    display_mode = st.sidebar.selectbox("View Mode", ["Detailed Cards", "Compact List"])
-    
     # Keyword search
     keyword_search = st.sidebar.text_input(
         "🔎 Search by Keywords",
@@ -532,37 +549,17 @@ def main():
         help="Enter keywords separated by commas. Will search in game name, descriptions, genres, and categories."
     )
     
-    # Genre filter
-    all_genres = set()
-    if 'Genres' in df.columns:
-        for genres_str in df['Genres'].dropna():
-            if str(genres_str).strip():
-                all_genres.update([g.strip() for g in str(genres_str).split(',') if g.strip()])
+    # Community Tags filter
+    all_tags = set()
+    if 'CommunityTags' in df.columns:
+        for tags_str in df['CommunityTags'].dropna():
+            if str(tags_str).strip():
+                all_tags.update([t.strip() for t in str(tags_str).split(',') if t.strip()])
     
-    selected_genres = st.sidebar.multiselect(
-        "🎨 Genres",
-        sorted(list(all_genres)),
-        help="Select one or more genres to filter by"
-    )
-    
-    # Developer filter
-    all_developers = set()
-    if 'Developers' in df.columns:
-        for dev_str in df['Developers'].dropna():
-            if str(dev_str).strip():
-                all_developers.update([d.strip() for d in str(dev_str).split(',') if d.strip()])
-    
-    selected_developers = st.sidebar.multiselect(
-        "👥 Developers",
-        sorted(list(all_developers)),
-        help="Select one or more developers to filter by"
-    )
-    
-    # Price filter
-    price_filter = st.sidebar.selectbox(
-        "💰 Price Range",
-        ["All", "Free", "Paid", "On Sale"],
-        help="Filter games by price"
+    selected_tags = st.sidebar.multiselect(
+        "🎯 Community Tags",
+        sorted(list(all_tags)),
+        help="Select one or more community tags to filter by"
     )
     
     # Demo filter
@@ -600,38 +597,16 @@ def main():
     # Keyword filter
     if keyword_search:
         filtered_df = filter_games_by_keywords(filtered_df, keyword_search)
+        if not isinstance(filtered_df, pd.DataFrame):
+            filtered_df = pd.DataFrame(filtered_df)
     
-    # Genre filter
-    if selected_genres and 'Genres' in filtered_df.columns:
-        genre_mask = pd.Series([False] * len(filtered_df), index=filtered_df.index)
-        for genre in selected_genres:
-            mask = filtered_df['Genres'].astype(str).str.contains(genre, case=False, na=False, regex=False)
-            genre_mask = genre_mask | mask
-        filtered_df = filtered_df[genre_mask]
-    
-    # Developer filter
-    if selected_developers and 'Developers' in filtered_df.columns:
-        dev_mask = pd.Series([False] * len(filtered_df), index=filtered_df.index)
-        for developer in selected_developers:
-            mask = filtered_df['Developers'].astype(str).str.contains(developer, case=False, na=False)
-            dev_mask = dev_mask | mask
-        filtered_df = filtered_df[dev_mask]
-    
-    # Price filter
-    if 'Price' in filtered_df.columns:
-        if price_filter == "Free":
-            price_mask = filtered_df['Price'].astype(str).str.contains('Free', case=False, na=False)
-            filtered_df = filtered_df[price_mask]
-        elif price_filter == "Paid":
-            price_mask = ~filtered_df['Price'].astype(str).str.contains('Free', case=False, na=False)
-            filtered_df = filtered_df[price_mask]
-        elif price_filter == "On Sale":
-            # Look for discount indicators in price
-            price_series = filtered_df['Price'].astype(str)
-            price_mask = (price_series.str.contains('$', na=False) & 
-                         (price_series.str.contains('-', na=False) | 
-                          price_series.str.contains('%', na=False)))
-            filtered_df = filtered_df[price_mask]
+    # Community tags filter
+    if selected_tags and 'CommunityTags' in filtered_df.columns:
+        tag_mask = pd.Series([False] * len(filtered_df), index=filtered_df.index)
+        for tag in selected_tags:
+            mask = filtered_df['CommunityTags'].astype(str).str.contains(tag, case=False, na=False, regex=False)
+            tag_mask = tag_mask | mask
+        filtered_df = filtered_df[tag_mask].copy()
     
     # Demo filter
     if demo_filter == "Has Demo":
@@ -687,151 +662,155 @@ def main():
     
     st.write(f"Showing {len(page_df)} of {len(filtered_df)} games")
     
-    # Display games
-    if display_mode == "Detailed Cards":
-        for _, game in page_df.iterrows():
-            display_game_card(game)
-    else:
-        # Clean 3-column layout with equal heights
-        for _, game in page_df.iterrows():
-            with st.container():
-                # 3-column layout: Main Image | Game Data | Media (Trailer + Screenshots)
-                img_col, data_col, media_col = st.columns([2, 2, 4], gap="medium")
+    # Display games in compact view
+    for _, game in page_df.iterrows():
+        with st.container():
+            # 3-column layout: Main Image | Game Data | Media (Trailer + Screenshots)
+            img_col, data_col, media_col = st.columns([2, 2, 4], gap="medium")
+            
+            # Column 1: Main Image
+            with img_col:
+                header_image = game.get('HeaderImage')
+                if pd.notna(header_image) and str(header_image).strip():
+                    st.image(str(header_image), use_container_width=True)
+                else:
+                    st.write("🎮")  # Fallback icon
+            
+            # Column 2: Game Data
+            with data_col:
+                # Game title
+                game_url = game.get('URL', '#')
+                if pd.notna(game_url) and str(game_url).strip():
+                    st.write(f"**[{game['Name']}]({str(game_url)})**")
+                else:
+                    st.write(f"**{game['Name']}**")
                 
-                # Column 1: Main Image
-                with img_col:
-                    if pd.notna(game.get('HeaderImage')):
-                        st.image(game['HeaderImage'], use_container_width=True)
-                    else:
-                        st.write("🎮")  # Fallback icon
+                # Horizontal row for optional info
+                info_cols = st.columns(3)
+
+                                 # Slot 1: Developer Email
+                 with info_cols[0]:
+                     support_email = game.get('SupportEmail')
+                     if support_email is not None and str(support_email).strip():
+                         st.link_button("📧 Dev Email", f"mailto:{str(support_email)}")
+                 
+                 # Slot 2: Developer URL
+                 with info_cols[1]:
+                     support_url = game.get('SupportURL')
+                     if support_url is not None and str(support_url).strip():
+                         st.link_button("🌐 Dev URL", str(support_url))
+
+                # Slot 3: Demo Status
+                with info_cols[2]:
+                    demo_status = get_demo_status(game)
+                    if demo_status['has_demo']:
+                        st.info("🎯 Demo")
                 
-                # Column 2: Game Data
-                with data_col:
-                    # Game title
-                    st.write(f"**[{game['Name']}]({game.get('URL', '#')})**")
-                    
-                    # Horizontal row for optional info
-                    info_cols = st.columns(3)
+                # Description
+                short_desc = game.get('ShortDescription')
+                if pd.notna(short_desc) and str(short_desc).strip():
+                    st.write(str(short_desc))
+                
+                # Display real Steam Community Tags
+                display_game_tags(game)
+                
+                # Date information row (at the bottom)
+                date_parts = []
+                date_added = game.get('DateAdded')
+                if pd.notna(date_added):
+                    date_added_str = f"📅 Added: {format_date_added(date_added)}"
+                    date_parts.append(date_added_str)
+                
+                release_date = game.get('ReleaseDate')
+                if pd.notna(release_date):
+                    try:
+                        release_date_parsed = pd.to_datetime(release_date, errors='coerce')
+                        if pd.notna(release_date_parsed):
+                            release_date_str = f"🚀 Released: {release_date_parsed.strftime('%m/%d/%y')}"
+                            date_parts.append(release_date_str)
+                    except:
+                        pass
+                
+                if date_parts:
+                    st.caption(" &nbsp; • &nbsp; ".join(date_parts), unsafe_allow_html=True)
 
-                    # Slot 1: Developer Email
-                    with info_cols[0]:
-                        if pd.notna(game.get('SupportEmail')) and str(game['SupportEmail']).strip():
-                            st.link_button("📧 Dev Email", f"mailto:{game['SupportEmail']}")
-                    
-                    # Slot 2: Developer URL
-                    with info_cols[1]:
-                        if pd.notna(game.get('SupportURL')) and str(game['SupportURL']).strip():
-                            st.link_button("🌐 Dev URL", game['SupportURL'])
-
-                    # Slot 3: Demo Status
-                    with info_cols[2]:
-                        demo_status = get_demo_status(game)
-                        if demo_status['has_demo']:
-                            st.info("🎯 Demo")
-                    
-                    # Description
-                    if pd.notna(game.get('ShortDescription')):
-                        short_desc = str(game['ShortDescription'])
-                        st.write(short_desc)
-                    
-                    # Display real Steam Community Tags
-                    display_game_tags(game)
-                    
-                    # Date information row (at the bottom)
-                    date_parts = []
-                    if pd.notna(game.get('DateAdded')):
-                        date_added_str = f"📅 Added: {format_date_added(game['DateAdded'])}"
-                        date_parts.append(date_added_str)
-                    
-                    if pd.notna(game.get('ReleaseDate')):
+            # Column 3: Media (Trailer + All Screenshots in Tabs)
+            with media_col:
+                # Trailer section (always visible first)
+                trailer_col, screenshots_col = st.columns([1, 2])
+                
+                with trailer_col:
+                    st.markdown("**🎬 Trailer**")
+                    trailer_url = game.get('FirstTrailerURL')
+                    if pd.notna(trailer_url) and str(trailer_url).strip():
+                        trailer_url_str = str(trailer_url)
                         try:
-                            release_date = pd.to_datetime(game['ReleaseDate'], errors='coerce')
-                            if pd.notna(release_date):
-                                release_date_str = f"🚀 Released: {release_date.strftime('%m/%d/%y')}"
-                                date_parts.append(release_date_str)
+                            st.video(trailer_url_str)
                         except:
-                            pass
-                    
-                    if date_parts:
-                        st.caption(" &nbsp; • &nbsp; ".join(date_parts), unsafe_allow_html=True)
-
-                # Column 3: Media (Trailer + All Screenshots in Tabs)
-                with media_col:
-                    # Trailer section (always visible first)
-                    trailer_col, screenshots_col = st.columns([1, 2])
-                    
-                    with trailer_col:
-                        st.markdown("**🎬 Trailer**")
-                        if pd.notna(game.get('FirstTrailerURL')):
-                            trailer_url = str(game['FirstTrailerURL'])
-                            if trailer_url.strip():
-                                try:
-                                    st.video(trailer_url)
-                                except:
-                                    st.markdown(f"**[🎬 Watch]({trailer_url})**")
-                        else:
-                            st.info("No trailer available")
-                    
-                    # Screenshots section with true horizontal scrollable layout
-                    with screenshots_col:
-                        st.markdown("**📷 Screenshots**")
-                        try:
-                            screenshots_json = game.get('Screenshots', '')
-                            if screenshots_json and str(screenshots_json).strip() and str(screenshots_json) != '[]':
-                                screenshots = json.loads(screenshots_json)
-                                if screenshots:
-                                    # Create CSS for horizontal scrolling container
-                                    st.markdown("""
-                                    <style>
-                                    .screenshot-container {
-                                        display: flex;
-                                        overflow-x: auto;
-                                        gap: 10px;
-                                        padding: 5px 0;
-                                        height: 200px;
-                                        align-items: center;
-                                    }
-                                    .screenshot-container img {
-                                        height: 180px;
-                                        width: auto;
-                                        flex-shrink: 0;
-                                        border-radius: 8px;
-                                        object-fit: cover;
-                                    }
-                                    .screenshot-container::-webkit-scrollbar {
-                                        height: 8px;
-                                    }
-                                    .screenshot-container::-webkit-scrollbar-track {
-                                        background: #f1f1f1;
-                                        border-radius: 4px;
-                                    }
-                                    .screenshot-container::-webkit-scrollbar-thumb {
-                                        background: #888;
-                                        border-radius: 4px;
-                                    }
-                                    .screenshot-container::-webkit-scrollbar-thumb:hover {
-                                        background: #555;
-                                    }
-                                    </style>
-                                    """, unsafe_allow_html=True)
-                                    
-                                    # Build HTML for horizontal scrolling screenshots
-                                    screenshots_html = '<div class="screenshot-container">'
-                                    for screenshot in screenshots:
-                                        img_url = screenshot.get('thumbnail') or screenshot.get('full', '')
-                                        if img_url:
-                                            screenshots_html += f'<img src="{img_url}" alt="Screenshot">'
-                                    screenshots_html += '</div>'
-                                    
-                                    st.markdown(screenshots_html, unsafe_allow_html=True)
-                                else:
-                                    st.info("No screenshots available")
+                            st.markdown(f"**[🎬 Watch]({trailer_url_str})**")
+                    else:
+                        st.info("No trailer available")
+                
+                # Screenshots section with true horizontal scrollable layout
+                with screenshots_col:
+                    st.markdown("**📷 Screenshots**")
+                    try:
+                        screenshots_json = game.get('Screenshots', '')
+                        if pd.notna(screenshots_json) and str(screenshots_json).strip() and str(screenshots_json) != '[]':
+                            screenshots = json.loads(str(screenshots_json))
+                            if screenshots:
+                                # Create CSS for horizontal scrolling container
+                                st.markdown("""
+                                <style>
+                                .screenshot-container {
+                                    display: flex;
+                                    overflow-x: auto;
+                                    gap: 10px;
+                                    padding: 5px 0;
+                                    height: 200px;
+                                    align-items: center;
+                                }
+                                .screenshot-container img {
+                                    height: 180px;
+                                    width: auto;
+                                    flex-shrink: 0;
+                                    border-radius: 8px;
+                                    object-fit: cover;
+                                }
+                                .screenshot-container::-webkit-scrollbar {
+                                    height: 8px;
+                                }
+                                .screenshot-container::-webkit-scrollbar-track {
+                                    background: #f1f1f1;
+                                    border-radius: 4px;
+                                }
+                                .screenshot-container::-webkit-scrollbar-thumb {
+                                    background: #888;
+                                    border-radius: 4px;
+                                }
+                                .screenshot-container::-webkit-scrollbar-thumb:hover {
+                                    background: #555;
+                                }
+                                </style>
+                                """, unsafe_allow_html=True)
+                                
+                                # Build HTML for horizontal scrolling screenshots
+                                screenshots_html = '<div class="screenshot-container">'
+                                for screenshot in screenshots:
+                                    img_url = screenshot.get('thumbnail') or screenshot.get('full', '')
+                                    if img_url:
+                                        screenshots_html += f'<img src="{img_url}" alt="Screenshot">'
+                                screenshots_html += '</div>'
+                                
+                                st.markdown(screenshots_html, unsafe_allow_html=True)
                             else:
                                 st.info("No screenshots available")
-                        except (json.JSONDecodeError, TypeError, IndexError):
+                        else:
                             st.info("No screenshots available")
-                    
-                    st.markdown("---")
+                    except (json.JSONDecodeError, TypeError, IndexError):
+                        st.info("No screenshots available")
+                
+                st.markdown("---")
     
     # "Load More" button at the bottom of the page content
     if st.session_state.games_shown < len(filtered_df):
@@ -839,7 +818,7 @@ def main():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             if st.button("Load More Games", use_container_width=True):
-                st.session_state.games_shown += 10
+                st.session_state.games_shown += 20
                 st.rerun()
 
     # Summary statistics
@@ -849,17 +828,9 @@ def main():
         st.metric("Total Games", len(df))
         st.metric("Filtered Results", len(filtered_df))
         
-        if not filtered_df.empty and 'Price' in filtered_df.columns:
-            # Price distribution
-            free_mask = filtered_df['Price'].astype(str).str.contains('Free', case=False, na=False)
-            free_games = len(filtered_df[free_mask])
-            paid_games = len(filtered_df) - free_games
-            st.write(f"**Free Games:** {free_games}")
-            st.write(f"**Paid Games:** {paid_games}")
-            
-            # Demo availability
-            demo_count = len(filtered_df[(filtered_df['Demo'] == True) | (filtered_df['IsDemo'] == True)])
-            st.write(f"**Games with Demo:** {demo_count}")
+        # Demo availability
+        demo_count = len(filtered_df[(filtered_df['Demo'] == True) | (filtered_df['IsDemo'] == True)])
+        st.write(f"**Games with Demo:** {demo_count}")
 
 if __name__ == "__main__":
     main()
