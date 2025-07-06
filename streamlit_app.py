@@ -671,7 +671,7 @@ def main():
             # Column 1: Main Image
             with img_col:
                 header_image = game.get('HeaderImage')
-                if pd.notna(header_image) and str(header_image).strip():
+                if header_image is not None and str(header_image).strip():
                     st.image(str(header_image), use_container_width=True)
                 else:
                     st.write("🎮")  # Fallback icon
@@ -680,7 +680,7 @@ def main():
             with data_col:
                 # Game title
                 game_url = game.get('URL', '#')
-                if pd.notna(game_url) and str(game_url).strip():
+                if game_url is not None and str(game_url).strip():
                     st.write(f"**[{game['Name']}]({str(game_url)})**")
                 else:
                     st.write(f"**{game['Name']}**")
@@ -688,17 +688,17 @@ def main():
                 # Horizontal row for optional info
                 info_cols = st.columns(3)
 
-                                 # Slot 1: Developer Email
-                 with info_cols[0]:
-                     support_email = game.get('SupportEmail')
-                     if support_email is not None and str(support_email).strip():
-                         st.link_button("📧 Dev Email", f"mailto:{str(support_email)}")
-                 
-                 # Slot 2: Developer URL
-                 with info_cols[1]:
-                     support_url = game.get('SupportURL')
-                     if support_url is not None and str(support_url).strip():
-                         st.link_button("🌐 Dev URL", str(support_url))
+                # Slot 1: Developer Email
+                with info_cols[0]:
+                    support_email = game.get('SupportEmail')
+                    if support_email is not None and str(support_email).strip():
+                        st.link_button("📧 Dev Email", f"mailto:{str(support_email)}")
+                
+                # Slot 2: Developer URL
+                with info_cols[1]:
+                    support_url = game.get('SupportURL')
+                    if support_url is not None and str(support_url).strip():
+                        st.link_button("🌐 Dev URL", str(support_url))
 
                 # Slot 3: Demo Status
                 with info_cols[2]:
@@ -708,7 +708,7 @@ def main():
                 
                 # Description
                 short_desc = game.get('ShortDescription')
-                if pd.notna(short_desc) and str(short_desc).strip():
+                if short_desc is not None and str(short_desc).strip():
                     st.write(str(short_desc))
                 
                 # Display real Steam Community Tags
@@ -717,15 +717,15 @@ def main():
                 # Date information row (at the bottom)
                 date_parts = []
                 date_added = game.get('DateAdded')
-                if pd.notna(date_added):
+                if date_added is not None:
                     date_added_str = f"📅 Added: {format_date_added(date_added)}"
                     date_parts.append(date_added_str)
                 
                 release_date = game.get('ReleaseDate')
-                if pd.notna(release_date):
+                if release_date is not None:
                     try:
-                        release_date_parsed = pd.to_datetime(release_date, errors='coerce')
-                        if pd.notna(release_date_parsed):
+                        release_date_parsed = pd.to_datetime(str(release_date), errors='coerce')
+                        if release_date_parsed is not None and not pd.isna(release_date_parsed):
                             release_date_str = f"🚀 Released: {release_date_parsed.strftime('%m/%d/%y')}"
                             date_parts.append(release_date_str)
                     except:
@@ -742,7 +742,7 @@ def main():
                 with trailer_col:
                     st.markdown("**🎬 Trailer**")
                     trailer_url = game.get('FirstTrailerURL')
-                    if pd.notna(trailer_url) and str(trailer_url).strip():
+                    if trailer_url is not None and str(trailer_url).strip():
                         trailer_url_str = str(trailer_url)
                         try:
                             st.video(trailer_url_str)
@@ -756,7 +756,7 @@ def main():
                     st.markdown("**📷 Screenshots**")
                     try:
                         screenshots_json = game.get('Screenshots', '')
-                        if pd.notna(screenshots_json) and str(screenshots_json).strip() and str(screenshots_json) != '[]':
+                        if screenshots_json is not None and str(screenshots_json).strip() and str(screenshots_json) != '[]':
                             screenshots = json.loads(str(screenshots_json))
                             if screenshots:
                                 # Create CSS for horizontal scrolling container
