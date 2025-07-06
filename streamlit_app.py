@@ -72,23 +72,18 @@ def load_steam_data():
     try:
         # Fix for Streamlit Community Cloud - properly handle service account credentials
         
-        # Debug: Show what type of credentials we're working with
-        st.write(f"🔍 Debug: SERVICE_ACCOUNT_INFO type: {type(SERVICE_ACCOUNT_INFO)}")
-        
         # Try to load as JSON string first (alternative method)
         if isinstance(SERVICE_ACCOUNT_INFO, str):
             try:
                 svc_info = json.loads(SERVICE_ACCOUNT_INFO)
-                st.write("✅ Debug: Successfully parsed JSON string credentials")
             except json.JSONDecodeError:
                 st.error("Invalid JSON format in service account credentials")
                 return pd.DataFrame()
         else:
             # Load as dict (original method)
             svc_info = dict(SERVICE_ACCOUNT_INFO)  # Convert SecretsDict to a regular dict
-            st.write("✅ Debug: Using dict-based credentials")
         
-        # Debug: Check if we have the required fields
+        # Check if we have the required fields
         required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email', 'client_id']
         missing_fields = [field for field in required_fields if field not in svc_info]
         if missing_fields:
@@ -106,7 +101,6 @@ def load_steam_data():
                 # Remove any accidental prefix characters
                 private_key = private_key.strip()
             svc_info['private_key'] = private_key
-            st.write("✅ Debug: Private key formatting corrected")
         
         # Ensure all required fields are strings
         for field in required_fields:
@@ -118,13 +112,10 @@ def load_steam_data():
             svc_info,
             scopes=SERVICE_ACCOUNT_SCOPES
         )
-        st.write("✅ Debug: Credentials created successfully")
         
         client = gspread.authorize(creds)
-        st.write("✅ Debug: gspread client authorized")
         
         sheet = client.open(SPREADSHEET_NAME)
-        st.write("✅ Debug: Spreadsheet opened successfully")
 
         try:
             master_sheet = sheet.worksheet('Steam_Master')
@@ -137,8 +128,6 @@ def load_steam_data():
             # Convert data types
             if 'AppID' in df.columns:
                 df['AppID'] = pd.to_numeric(df['AppID'], errors='coerce')
-            if 'ReleaseDate' in df.columns:
-                df['ReleaseDate'] = pd.to_datetime(df['ReleaseDate'], errors='coerce')
             if 'DateAdded' in df.columns:
                 df['DateAdded'] = pd.to_datetime(df['DateAdded'], errors='coerce')
             # Convert boolean fields
@@ -478,18 +467,10 @@ def display_game_card(game):
             
             # Date information row (at the bottom)
             date_parts = []
-            if pd.notna(game.get('DateAdded')):
-                date_added_str = f"📅 Added: {format_date_added(game['DateAdded'])}"
+            date_added = game.get('DateAdded')
+            if date_added is not None:
+                date_added_str = f"📅 Added: {format_date_added(date_added)}"
                 date_parts.append(date_added_str)
-            
-            if pd.notna(game.get('ReleaseDate')):
-                try:
-                    release_date = pd.to_datetime(game['ReleaseDate'], errors='coerce')
-                    if pd.notna(release_date):
-                        release_date_str = f"🚀 Released: {release_date.strftime('%m/%d/%y')}"
-                        date_parts.append(release_date_str)
-                except:
-                    pass
             
             if date_parts:
                 st.caption(" &nbsp; • &nbsp; ".join(date_parts), unsafe_allow_html=True)
@@ -569,25 +550,11 @@ def main():
         help="Filter by demo availability"
     )
     
-    # Release date filter
-    st.sidebar.subheader("📅 Release Date")
-    date_filter = st.sidebar.selectbox(
-        "Time Period",
-        ["All Time", "Last 30 Days", "Last 90 Days", "This Year", "Custom Range"]
-    )
-    
-    if date_filter == "Custom Range":
-        col1, col2 = st.sidebar.columns(2)
-        with col1:
-            start_date = st.date_input("From", value=datetime.now().date().replace(month=1, day=1))
-        with col2:
-            end_date = st.date_input("To", value=datetime.now().date())
-    
     # Sort options
     st.sidebar.subheader("🔄 Sort Options")
     sort_option = st.sidebar.selectbox(
         "Sort By",
-        ["Date Added (Newest First)", "Date Added (Oldest First)", "Name (A-Z)", "Name (Z-A)", "Release Date (Newest First)", "Release Date (Oldest First)"],
+        ["Date Added (Newest First)", "Date Added (Oldest First)", "Name (A-Z)", "Name (Z-A)"],
         help="Choose how to sort the results"
     )
     
@@ -596,9 +563,11 @@ def main():
     
     # Keyword filter
     if keyword_search:
-        filtered_df = filter_games_by_keywords(filtered_df, keyword_search)
-        if not isinstance(filtered_df, pd.DataFrame):
-            filtered_df = pd.DataFrame(filtered_df)
+        result = filter_games_by_keywords(filtered_df, keyword_search)
+        if isinstance(result, pd.DataFrame):
+            filtered_df = result
+        else:
+            filtered_df = pd.DataFrame(result)
     
     # Community tags filter
     if selected_tags and 'CommunityTags' in filtered_df.columns:
@@ -611,27 +580,7 @@ def main():
     # Demo filter
     if demo_filter == "Has Demo":
         demo_mask = (filtered_df['Demo'] == True) | (filtered_df['IsDemo'] == True)
-        filtered_df = filtered_df[demo_mask]
-    
-    # Date filter
-    if date_filter != "All Time" and 'ReleaseDate' in filtered_df.columns:
-        now = datetime.now()
-        if date_filter == "Last 30 Days":
-            cutoff_date = now - pd.Timedelta(days=30)
-            filtered_df = filtered_df[filtered_df['ReleaseDate'] >= cutoff_date]
-        elif date_filter == "Last 90 Days":
-            cutoff_date = now - pd.Timedelta(days=90)
-            filtered_df = filtered_df[filtered_df['ReleaseDate'] >= cutoff_date]
-        elif date_filter == "This Year":
-            start_of_year = datetime(now.year, 1, 1)
-            filtered_df = filtered_df[filtered_df['ReleaseDate'] >= start_of_year]
-        elif date_filter == "Custom Range":
-            start_datetime = pd.to_datetime(start_date)
-            end_datetime = pd.to_datetime(end_date)
-            filtered_df = filtered_df[
-                (filtered_df['ReleaseDate'] >= start_datetime) & 
-                (filtered_df['ReleaseDate'] <= end_datetime)
-            ]
+        filtered_df = filtered_df[demo_mask].copy()
     
     # Apply sorting
     if not filtered_df.empty:
@@ -644,10 +593,6 @@ def main():
             filtered_df = filtered_df.sort_values('Name', ascending=True)
         elif sort_option == "Name (Z-A)":
             filtered_df = filtered_df.sort_values('Name', ascending=False)
-        elif sort_option == "Release Date (Newest First)":
-            filtered_df = filtered_df.sort_values(['ReleaseDate', 'Name'], ascending=[False, True], na_position='last')
-        elif sort_option == "Release Date (Oldest First)":
-            filtered_df = filtered_df.sort_values(['ReleaseDate', 'Name'], ascending=[True, True], na_position='first')
     
     # Display results
     st.header(f"📊 Results ({len(filtered_df)} games)")
@@ -720,16 +665,6 @@ def main():
                 if date_added is not None:
                     date_added_str = f"📅 Added: {format_date_added(date_added)}"
                     date_parts.append(date_added_str)
-                
-                release_date = game.get('ReleaseDate')
-                if release_date is not None:
-                    try:
-                        release_date_parsed = pd.to_datetime(str(release_date), errors='coerce')
-                        if release_date_parsed is not None and not pd.isna(release_date_parsed):
-                            release_date_str = f"🚀 Released: {release_date_parsed.strftime('%m/%d/%y')}"
-                            date_parts.append(release_date_str)
-                    except:
-                        pass
                 
                 if date_parts:
                     st.caption(" &nbsp; • &nbsp; ".join(date_parts), unsafe_allow_html=True)
