@@ -604,9 +604,15 @@ def main():
                 all_tags.update([t.strip() for t in str(tags_str).split(',') if t.strip()])
     
     selected_tags = st.sidebar.multiselect(
-        "🎯 Community Tags",
+        "🎯 Include Tags (ALL required)",
         sorted(list(all_tags)),
-        help="Select one or more community tags to filter by"
+        help="Games must have ALL selected tags"
+    )
+    
+    excluded_tags = st.sidebar.multiselect(
+        "🚫 Exclude Tags (ANY excludes)",
+        sorted(list(all_tags)),
+        help="Games with ANY of these tags will be excluded"
     )
     
     # Demo filter
@@ -649,13 +655,22 @@ def main():
         else:
             filtered_df = pd.DataFrame(result)
     
-    # Community tags filter
+    # Community tags filter - INCLUDE (AND logic: ALL tags must be present)
     if selected_tags and 'CommunityTags' in filtered_df.columns:
-        tag_mask = pd.Series([False] * len(filtered_df), index=filtered_df.index)
+        include_mask = pd.Series([True] * len(filtered_df), index=filtered_df.index)
         for tag in selected_tags:
-            mask = filtered_df['CommunityTags'].astype(str).str.contains(tag, case=False, na=False, regex=False)
-            tag_mask = tag_mask | mask
-        filtered_df = filtered_df.loc[tag_mask].copy()
+            tag_present_mask = filtered_df['CommunityTags'].astype(str).str.contains(tag, case=False, na=False, regex=False)
+            include_mask = include_mask & tag_present_mask  # AND logic - all tags must be present
+        filtered_df = filtered_df.loc[include_mask].copy()
+    
+    # Community tags filter - EXCLUDE (OR logic: ANY tag excludes the game)
+    if excluded_tags and 'CommunityTags' in filtered_df.columns:
+        exclude_mask = pd.Series([False] * len(filtered_df), index=filtered_df.index)
+        for tag in excluded_tags:
+            tag_present_mask = filtered_df['CommunityTags'].astype(str).str.contains(tag, case=False, na=False, regex=False)
+            exclude_mask = exclude_mask | tag_present_mask  # OR logic - any tag excludes
+        # Keep games that DON'T have excluded tags
+        filtered_df = filtered_df.loc[~exclude_mask].copy()
     
     # Demo filter
     if demo_filter == "Has Demo":
@@ -938,6 +953,14 @@ def main():
             st.write(f"- ✅ Released: {released_count}")
             st.write(f"- 🔜 Coming Soon: {coming_soon_count}")
             st.write(f"- 🔮 Distant Future: {distant_future_count}")
+        
+        # Tag filtering breakdown
+        if selected_tags or excluded_tags:
+            st.write("**🎯 Tag Filtering:**")
+            if selected_tags:
+                st.write(f"- ✅ Requires ALL: {', '.join(selected_tags[:3])}{' (+more)' if len(selected_tags) > 3 else ''}")
+            if excluded_tags:
+                st.write(f"- 🚫 Excludes ANY: {', '.join(excluded_tags[:3])}{' (+more)' if len(excluded_tags) > 3 else ''}")
         
         # Adult content breakdown
         if not df.empty:
