@@ -718,13 +718,45 @@ def main():
                 # Slot 3: Release Status
                 with info_cols[2]:
                     release_display = get_release_status_display(game)
-                    st.button(release_display['badge_text'], disabled=True, use_container_width=True)
+                    st.markdown(
+                        f"""<div style="
+                            background-color: #d1ecf1; 
+                            color: #0c5460; 
+                            padding: 0.25rem 0.75rem; 
+                            border-radius: 0.375rem; 
+                            text-align: center; 
+                            font-weight: 400; 
+                            border: 1px solid #bee5eb;
+                            height: 38px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            font-size: 14px;
+                        ">{release_display['badge_text']}</div>""", 
+                        unsafe_allow_html=True
+                    )
 
                 # Slot 4: Demo Status
                 with info_cols[3]:
                     demo_status = get_demo_status(game)
                     if demo_status['has_demo']:
-                        st.button("🎯 Demo", disabled=True, use_container_width=True)
+                        st.markdown(
+                            f"""<div style="
+                                background-color: #d1ecf1; 
+                                color: #0c5460; 
+                                padding: 0.25rem 0.75rem; 
+                                border-radius: 0.375rem; 
+                                text-align: center; 
+                                font-weight: 400; 
+                                border: 1px solid #bee5eb;
+                                height: 38px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                font-size: 14px;
+                            ">🎯 Demo</div>""", 
+                            unsafe_allow_html=True
+                        )
                 
                 # Description
                 short_desc = game.get('ShortDescription')
