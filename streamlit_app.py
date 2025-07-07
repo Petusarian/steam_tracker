@@ -701,7 +701,7 @@ def main():
                     st.write(f"**{game['Name']}**")
                 
                 # Horizontal row for optional info
-                info_cols = st.columns(3)
+                info_cols = st.columns(4)
 
                 # Slot 1: Developer Email
                 with info_cols[0]:
@@ -719,13 +719,19 @@ def main():
                 with info_cols[2]:
                     release_display = get_release_status_display(game)
                     if release_display['status_color'] == 'green':
-                        st.success(release_display['badge_text'])
+                        st.info(release_display['badge_text'])
                     elif release_display['status_color'] == 'orange':
-                        st.warning(release_display['badge_text'])
+                        st.info(release_display['badge_text'])
                     elif release_display['status_color'] == 'blue':
                         st.info(release_display['badge_text'])
                     else:
                         st.info(release_display['badge_text'])
+
+                # Slot 4: Demo Status
+                with info_cols[3]:
+                    demo_status = get_demo_status(game)
+                    if demo_status['has_demo']:
+                        st.info("🎯 Demo")
                 
                 # Description
                 short_desc = game.get('ShortDescription')
