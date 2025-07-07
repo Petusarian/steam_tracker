@@ -4,7 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import json
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 import logging
 import time
 
@@ -24,61 +24,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# === SMART CACHING FUNCTIONS ===
-
-def get_croatian_time():
-    """Get current time in Croatian timezone (CET/CEST)."""
-    # Croatian timezone is UTC+1 (CET) in winter, UTC+2 (CEST) in summer
-    # We'll use a simple approach with UTC offset
-    utc_now = datetime.now(timezone.utc)
-    
-    # Determine if it's daylight saving time (rough approximation)
-    # DST in Europe typically runs from last Sunday in March to last Sunday in October
-    year = utc_now.year
-    march_last_sunday = datetime(year, 3, 31) - timedelta(days=datetime(year, 3, 31).weekday() + 1 % 7)
-    october_last_sunday = datetime(year, 10, 31) - timedelta(days=datetime(year, 10, 31).weekday() + 1 % 7)
-    
-    # Simple DST check (not perfect but good enough)
-    if march_last_sunday <= utc_now.replace(tzinfo=None) < october_last_sunday:
-        croatia_offset = timedelta(hours=2)  # CEST (UTC+2)
-    else:
-        croatia_offset = timedelta(hours=1)   # CET (UTC+1)
-    
-    return utc_now + croatia_offset
-
-def should_update_cache():
-    """Check if we should update the cache based on Croatian time and last update."""
-    if 'last_cache_update' not in st.session_state:
-        return True
-    
-    croatia_time = get_croatian_time()
-    last_update = st.session_state.get('last_cache_update')
-    
-    if not last_update:
-        return True
-    
-    # Check if it's past 20:00 Croatian time and we haven't updated today
-    if croatia_time.hour >= 20:
-        # Check if last update was before today's 20:00
-        today_update_time = croatia_time.replace(hour=20, minute=0, second=0, microsecond=0)
-        if last_update < today_update_time:
-            return True
-    
-    return False
-
-def get_cache_key():
-    """Generate a cache key that changes daily at 20:00 Croatian time."""
-    croatia_time = get_croatian_time()
-    
-    # If it's before 20:00, use yesterday's date
-    # If it's after 20:00, use today's date
-    if croatia_time.hour >= 20:
-        cache_date = croatia_time.date()
-    else:
-        cache_date = (croatia_time - timedelta(days=1)).date()
-    
-    return f"steam_data_{cache_date}"
 
 # Custom CSS for better media display
 st.markdown("""
@@ -121,8 +66,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def load_fresh_data_from_sheets():
-    """Load fresh data from Google Sheets (helper function)."""
+@st.cache_data(ttl=300)
+def load_steam_data():
+    """Load Steam game data from Google Sheets with caching."""
     try:
         # Fix for Streamlit Community Cloud - properly handle service account credentials
         
@@ -198,73 +144,6 @@ def load_fresh_data_from_sheets():
         import traceback
         st.error(f"Detailed error: {traceback.format_exc()}")
         return pd.DataFrame()
-
-@st.cache_data(ttl=86400)  # 24 hours cache
-def load_steam_data():
-    """Load Steam game data with smart daily caching at 20:00 Croatian time."""
-    
-    # Initialize session state for cache management
-    if 'cached_steam_data' not in st.session_state:
-        st.session_state.cached_steam_data = pd.DataFrame()
-    if 'last_cache_update' not in st.session_state:
-        st.session_state.last_cache_update = None
-    
-    croatia_time = get_croatian_time()
-    
-    # Check if we have cached data and if we should update
-    if not st.session_state.cached_steam_data.empty and not should_update_cache():
-        # Return cached data with cache info
-        time_until_update = 20 - croatia_time.hour if croatia_time.hour < 20 else 24 - croatia_time.hour + 20
-        st.info(f"📱 Using cached data. Next update at 20:00 Croatian time ({time_until_update}h remaining)")
-        return st.session_state.cached_steam_data
-    
-    # Load fresh data
-    with st.spinner("🔄 Loading fresh data from Google Sheets..."):
-        fresh_data = load_fresh_data_from_sheets()
-    
-    if fresh_data.empty:
-        # If we can't load fresh data, return cached data if available
-        if not st.session_state.cached_steam_data.empty:
-            st.warning("⚠️ Could not load fresh data, using cached version")
-            return st.session_state.cached_steam_data
-        return fresh_data
-    
-    # Check if this is an incremental update
-    if not st.session_state.cached_steam_data.empty:
-        cached_data = st.session_state.cached_steam_data
-        
-                 # Find new games (not in cached data)
-         if 'AppID' in cached_data.columns and 'AppID' in fresh_data.columns:
-             cached_ids = set(cached_data['AppID'].dropna())
-             fresh_ids = set(fresh_data['AppID'].dropna())
-             new_ids = fresh_ids - cached_ids
-             
-             if new_ids:
-                 new_games = fresh_data[fresh_data['AppID'].isin(list(new_ids))]
-                 st.success(f"🎮 Found {len(new_games)} new games since last update!")
-                 
-                 # Merge new games with cached data
-                 updated_data = pd.concat([new_games, cached_data], ignore_index=True)
-                 
-                 # Sort by DateAdded (newest first)
-                 if 'DateAdded' in updated_data.columns:
-                     updated_data = updated_data.sort_values(by='DateAdded', ascending=False)
-                 
-                 # Update cache
-                 st.session_state.cached_steam_data = updated_data
-                 st.session_state.last_cache_update = croatia_time
-                 
-                 return updated_data
-             else:
-                 st.info("📊 No new games found, keeping existing data")
-                 return cached_data
-    
-    # First time loading or full refresh
-    st.success(f"✅ Loaded {len(fresh_data)} games from Steam database")
-    st.session_state.cached_steam_data = fresh_data
-    st.session_state.last_cache_update = croatia_time
-    
-    return fresh_data
 
 def create_description_search_text(row):
     """Combine all description fields for comprehensive text search."""
@@ -1082,22 +961,6 @@ def main():
                 st.write(f"- ✅ Requires ALL: {', '.join(selected_tags[:3])}{' (+more)' if len(selected_tags) > 3 else ''}")
             if excluded_tags:
                 st.write(f"- 🚫 Excludes ANY: {', '.join(excluded_tags[:3])}{' (+more)' if len(excluded_tags) > 3 else ''}")
-        
-        # Cache update schedule
-        st.markdown("---")
-        st.subheader("⏰ Cache Info")
-        croatia_time = get_croatian_time()
-        
-        if croatia_time.hour >= 20:
-            next_update = "Tomorrow at 20:00 Croatian time"
-            hours_remaining = 24 - croatia_time.hour + 20
-        else:
-            next_update = "Today at 20:00 Croatian time"
-            hours_remaining = 20 - croatia_time.hour
-        
-        st.write(f"**Current Time (Croatia):** {croatia_time.strftime('%H:%M')}")
-        st.write(f"**Next Update:** {next_update}")
-        st.write(f"**Hours Until Update:** {hours_remaining}")
         
         # Adult content breakdown
         if not df.empty:
