@@ -714,8 +714,8 @@ def main():
     # Display games in compact view
     for _, game in page_df.iterrows():
         with st.container():
-            # 3-column layout: Main Image | Game Data | Media (Trailer + Screenshots)
-            img_col, data_col, media_col = st.columns([2, 2, 4], gap="medium")
+            # 3-column layout optimized for medium resolutions: Main Image | Game Data | Media
+            img_col, data_col, media_col = st.columns([2, 3, 3], gap="medium")
             
             # Column 1: Main Image
             with img_col:
@@ -734,23 +734,23 @@ def main():
                 else:
                     st.write(f"**{game['Name']}**")
                 
-                # Horizontal row for optional info
-                info_cols = st.columns(4)
+                # Responsive 2x2 button layout for better medium-screen compatibility
+                row1_cols = st.columns(2)
+                row2_cols = st.columns(2)
 
-                # Slot 1: Developer Email
-                with info_cols[0]:
+                # Row 1: Developer Email and URL
+                with row1_cols[0]:
                     support_email = game.get('SupportEmail')
                     if support_email is not None and str(support_email).strip():
-                        st.link_button("📧 Dev Email", f"mailto:{str(support_email)}")
+                        st.link_button("📧 Dev Email", f"mailto:{str(support_email)}", use_container_width=True)
                 
-                # Slot 2: Developer URL
-                with info_cols[1]:
+                with row1_cols[1]:
                     support_url = game.get('SupportURL')
                     if support_url is not None and str(support_url).strip():
-                        st.link_button("🌐 Dev URL", str(support_url))
+                        st.link_button("🌐 Dev URL", str(support_url), use_container_width=True)
 
-                # Slot 3: Release Status
-                with info_cols[2]:
+                # Row 2: Release Status and Demo Status
+                with row2_cols[0]:
                     release_display = get_release_status_display(game)
                     st.markdown(
                         f"""<div style="
@@ -766,12 +766,12 @@ def main():
                             align-items: center;
                             justify-content: center;
                             font-size: 14px;
+                            width: 100%;
                         ">{release_display['badge_text']}</div>""", 
                         unsafe_allow_html=True
                     )
 
-                # Slot 4: Demo Status
-                with info_cols[3]:
+                with row2_cols[1]:
                     demo_status = get_demo_status(game)
                     if demo_status['has_demo']:
                         st.markdown(
@@ -788,6 +788,7 @@ def main():
                                 align-items: center;
                                 justify-content: center;
                                 font-size: 14px;
+                                width: 100%;
                             ">🎯 Demo</div>""", 
                             unsafe_allow_html=True
                         )
@@ -823,8 +824,8 @@ def main():
 
             # Column 3: Media (Trailer + All Screenshots in Tabs)
             with media_col:
-                # Trailer section (always visible first)
-                trailer_col, screenshots_col = st.columns([1, 2])
+                # More balanced trailer/screenshot layout for medium resolutions
+                trailer_col, screenshots_col = st.columns([1, 1])
                 
                 with trailer_col:
                     st.markdown("**🎬 Trailer**")
@@ -846,37 +847,45 @@ def main():
                         if screenshots_json is not None and str(screenshots_json).strip() and str(screenshots_json) != '[]':
                             screenshots = json.loads(str(screenshots_json))
                             if screenshots:
-                                # Create CSS for horizontal scrolling container
+                                # Create CSS for horizontal scrolling container (responsive)
                                 st.markdown("""
                                 <style>
                                 .screenshot-container {
                                     display: flex;
                                     overflow-x: auto;
-                                    gap: 10px;
+                                    gap: 8px;
                                     padding: 5px 0;
-                                    height: 200px;
+                                    height: 160px;
                                     align-items: center;
                                 }
                                 .screenshot-container img {
-                                    height: 180px;
+                                    height: 140px;
                                     width: auto;
                                     flex-shrink: 0;
-                                    border-radius: 8px;
+                                    border-radius: 6px;
                                     object-fit: cover;
                                 }
                                 .screenshot-container::-webkit-scrollbar {
-                                    height: 8px;
+                                    height: 6px;
                                 }
                                 .screenshot-container::-webkit-scrollbar-track {
                                     background: #f1f1f1;
-                                    border-radius: 4px;
+                                    border-radius: 3px;
                                 }
                                 .screenshot-container::-webkit-scrollbar-thumb {
                                     background: #888;
-                                    border-radius: 4px;
+                                    border-radius: 3px;
                                 }
                                 .screenshot-container::-webkit-scrollbar-thumb:hover {
                                     background: #555;
+                                }
+                                @media (max-width: 1400px) {
+                                    .screenshot-container {
+                                        height: 140px;
+                                    }
+                                    .screenshot-container img {
+                                        height: 120px;
+                                    }
                                 }
                                 </style>
                                 """, unsafe_allow_html=True)
