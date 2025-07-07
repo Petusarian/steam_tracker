@@ -718,20 +718,13 @@ def main():
                 # Slot 3: Release Status
                 with info_cols[2]:
                     release_display = get_release_status_display(game)
-                    if release_display['status_color'] == 'green':
-                        st.info(release_display['badge_text'])
-                    elif release_display['status_color'] == 'orange':
-                        st.info(release_display['badge_text'])
-                    elif release_display['status_color'] == 'blue':
-                        st.info(release_display['badge_text'])
-                    else:
-                        st.info(release_display['badge_text'])
+                    st.button(release_display['badge_text'], disabled=True, use_container_width=True)
 
                 # Slot 4: Demo Status
                 with info_cols[3]:
                     demo_status = get_demo_status(game)
                     if demo_status['has_demo']:
-                        st.info("🎯 Demo")
+                        st.button("🎯 Demo", disabled=True, use_container_width=True)
                 
                 # Description
                 short_desc = game.get('ShortDescription')
