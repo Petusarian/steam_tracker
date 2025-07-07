@@ -425,6 +425,28 @@ def get_release_status_display(game):
             'badge_text': '❓ Unknown'
         }
 
+
+def is_adult_content(game):
+    """Check if a game contains adult content based on community tags."""
+    adult_tags = {
+        'sexual content', 'nudity', 'mature', 'nsfw', 'adult content', 
+        'hentai', 'sexual', 'erotic', 'adult', 'sex', 'nude'
+    }
+    
+    community_tags = game.get('CommunityTags', '')
+    if not community_tags or not isinstance(community_tags, str):
+        return False
+    
+    # Convert tags to lowercase for comparison
+    tags_lower = community_tags.lower()
+    
+    # Check if any adult tags are present
+    for adult_tag in adult_tags:
+        if adult_tag in tags_lower:
+            return True
+    
+    return False
+
 def display_game_card(game):
     """Display a detailed game card with enhanced layout and interactive elements."""
     with st.container():
@@ -601,6 +623,13 @@ def main():
         help="Filter by release status"
     )
     
+    # Adult content filter
+    show_adult_content = st.sidebar.checkbox(
+        "🔞 Show Adult Content",
+        value=False,
+        help="Show games with mature/adult content (hidden by default)"
+    )
+    
     # Sort options
     st.sidebar.subheader("🔄 Sort Options")
     sort_option = st.sidebar.selectbox(
@@ -644,6 +673,11 @@ def main():
         if target_status:
             status_mask = filtered_df['ReleaseStatus'].astype(str).str.lower() == target_status
             filtered_df = filtered_df.loc[status_mask].copy()
+    
+    # Adult content filter (filter out by default unless explicitly enabled)
+    if not show_adult_content:
+        adult_mask = filtered_df.apply(lambda row: not is_adult_content(row), axis=1)
+        filtered_df = filtered_df.loc[adult_mask].copy()
     
     # Apply sorting
     if not filtered_df.empty:
@@ -895,6 +929,15 @@ def main():
             st.write(f"- ✅ Released: {released_count}")
             st.write(f"- 🔜 Coming Soon: {coming_soon_count}")
             st.write(f"- 🔮 Distant Future: {distant_future_count}")
+        
+        # Adult content breakdown
+        if not df.empty:
+            total_adult_games = len(df[df.apply(lambda row: is_adult_content(row), axis=1)])
+            if not show_adult_content and total_adult_games > 0:
+                st.write(f"**🔞 Adult Content:** {total_adult_games} games hidden")
+            elif show_adult_content and total_adult_games > 0:
+                visible_adult_games = len(filtered_df[filtered_df.apply(lambda row: is_adult_content(row), axis=1)])
+                st.write(f"**🔞 Adult Content:** {visible_adult_games} games shown")
 
 if __name__ == "__main__":
     main()
