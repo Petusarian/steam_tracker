@@ -1186,8 +1186,7 @@ def main():
                 else:
                     st.write("🎮")  # Fallback icon
                 
-                # Favorites and List Management (moved here from middle column)
-                st.markdown("---")
+                # Favorites and List Management (directly under image)
                 fav_col, list_col = st.columns(2)
                 
                 with fav_col:
@@ -1203,6 +1202,9 @@ def main():
                             create_list_management_buttons(game)
                     else:
                         st.caption("Create lists in sidebar")
+                
+                # Separator line under favorites/lists
+                st.markdown("---")
             
             # Column 2: Game Data
             with data_col:
