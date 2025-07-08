@@ -4,7 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import logging
 import time
 
@@ -17,6 +17,154 @@ SERVICE_ACCOUNT_SCOPES = [
     'https://www.googleapis.com/auth/drive'
 ]
 
+# === FAVORITES & LISTS JAVASCRIPT ===
+def inject_favorites_js():
+    """Inject JavaScript for localStorage favorites and lists management."""
+    st.markdown("""
+    <script>
+    // Favorites and Lists Management
+    window.steamTracker = window.steamTracker || {};
+    
+    // Get favorites from localStorage
+    window.steamTracker.getFavorites = function() {
+        const favorites = localStorage.getItem('steamTracker_favorites');
+        return favorites ? JSON.parse(favorites) : [];
+    };
+    
+    // Set favorites to localStorage
+    window.steamTracker.setFavorites = function(favorites) {
+        localStorage.setItem('steamTracker_favorites', JSON.stringify(favorites));
+    };
+    
+    // Toggle favorite status
+    window.steamTracker.toggleFavorite = function(gameId, gameName) {
+        let favorites = window.steamTracker.getFavorites();
+        const index = favorites.findIndex(fav => fav.id === gameId);
+        
+        if (index === -1) {
+            favorites.push({ id: gameId, name: gameName, dateAdded: new Date().toISOString() });
+        } else {
+            favorites.splice(index, 1);
+        }
+        
+        window.steamTracker.setFavorites(favorites);
+        window.steamTracker.updateFavoriteButtons();
+        
+        // Trigger Streamlit rerun to update session state
+        window.parent.postMessage({
+            type: 'streamlit:setComponentValue',
+            value: { favorites: favorites }
+        }, '*');
+    };
+    
+    // Get custom lists from localStorage
+    window.steamTracker.getCustomLists = function() {
+        const lists = localStorage.getItem('steamTracker_customLists');
+        return lists ? JSON.parse(lists) : {};
+    };
+    
+    // Set custom lists to localStorage
+    window.steamTracker.setCustomLists = function(lists) {
+        localStorage.setItem('steamTracker_customLists', JSON.stringify(lists));
+    };
+    
+    // Add game to custom list
+    window.steamTracker.addToList = function(listName, gameId, gameName) {
+        let lists = window.steamTracker.getCustomLists();
+        if (!lists[listName]) {
+            lists[listName] = [];
+        }
+        
+        const index = lists[listName].findIndex(game => game.id === gameId);
+        if (index === -1) {
+            lists[listName].push({ id: gameId, name: gameName, dateAdded: new Date().toISOString() });
+            window.steamTracker.setCustomLists(lists);
+            
+            // Trigger Streamlit rerun
+            window.parent.postMessage({
+                type: 'streamlit:setComponentValue',
+                value: { customLists: lists }
+            }, '*');
+        }
+    };
+    
+    // Remove game from custom list
+    window.steamTracker.removeFromList = function(listName, gameId) {
+        let lists = window.steamTracker.getCustomLists();
+        if (lists[listName]) {
+            const index = lists[listName].findIndex(game => game.id === gameId);
+            if (index !== -1) {
+                lists[listName].splice(index, 1);
+                window.steamTracker.setCustomLists(lists);
+                
+                // Trigger Streamlit rerun
+                window.parent.postMessage({
+                    type: 'streamlit:setComponentValue',
+                    value: { customLists: lists }
+                }, '*');
+            }
+        }
+    };
+    
+    // Create new custom list
+    window.steamTracker.createList = function(listName) {
+        let lists = window.steamTracker.getCustomLists();
+        if (!lists[listName]) {
+            lists[listName] = [];
+            window.steamTracker.setCustomLists(lists);
+            
+            // Trigger Streamlit rerun
+            window.parent.postMessage({
+                type: 'streamlit:setComponentValue',
+                value: { customLists: lists }
+            }, '*');
+        }
+    };
+    
+    // Delete custom list
+    window.steamTracker.deleteList = function(listName) {
+        let lists = window.steamTracker.getCustomLists();
+        if (lists[listName]) {
+            delete lists[listName];
+            window.steamTracker.setCustomLists(lists);
+            
+            // Trigger Streamlit rerun
+            window.parent.postMessage({
+                type: 'streamlit:setComponentValue',
+                value: { customLists: lists }
+            }, '*');
+        }
+    };
+    
+    // Update favorite button appearances
+    window.steamTracker.updateFavoriteButtons = function() {
+        const favorites = window.steamTracker.getFavorites();
+        const favoriteIds = favorites.map(fav => fav.id);
+        
+        document.querySelectorAll('[data-game-id]').forEach(button => {
+            const gameId = parseInt(button.getAttribute('data-game-id'));
+            const isFavorite = favoriteIds.includes(gameId);
+            
+            if (button.classList.contains('favorite-btn')) {
+                button.innerHTML = isFavorite ? '💙 Favorited' : '🤍 Add to Favorites';
+                button.style.backgroundColor = isFavorite ? '#e3f2fd' : '#f5f5f5';
+            }
+        });
+    };
+    
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        window.steamTracker.updateFavoriteButtons();
+    });
+    
+    // Update buttons when page changes
+    const observer = new MutationObserver(function(mutations) {
+        window.steamTracker.updateFavoriteButtons();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    </script>
+    """, unsafe_allow_html=True)
+
 # === SETUP ===
 st.set_page_config(
     page_title="Steam Game Tracker",
@@ -25,7 +173,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better media display
+# Inject the favorites JavaScript
+inject_favorites_js()
+
+# Custom CSS for better media display and favorites
 st.markdown("""
 <style>
 .game-header-image {
@@ -63,12 +214,235 @@ st.markdown("""
     font-size: 0.8em;
     color: #666;
 }
+.favorite-btn {
+    transition: all 0.3s ease;
+}
+.favorite-btn:hover {
+    transform: scale(1.02);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=300)
-def load_steam_data():
-    """Load Steam game data from Google Sheets with caching."""
+# === FAVORITES & LISTS STATE MANAGEMENT ===
+def init_favorites_state():
+    """Initialize favorites and lists in session state."""
+    if 'favorites' not in st.session_state:
+        st.session_state.favorites = []
+    if 'custom_lists' not in st.session_state:
+        st.session_state.custom_lists = {}
+    if 'selected_list_filter' not in st.session_state:
+        st.session_state.selected_list_filter = "All"
+
+def get_game_id(game):
+    """Get a unique ID for a game (using AppID or name as fallback)."""
+    if pd.notna(game.get('AppID')):
+        return int(game['AppID'])
+    else:
+        # Fallback to hash of name if AppID not available
+        return hash(game['Name'])
+
+def is_game_favorited(game_id):
+    """Check if a game is in favorites."""
+    return any(fav.get('id') == game_id for fav in st.session_state.favorites)
+
+def is_game_in_list(game_id, list_name):
+    """Check if a game is in a specific custom list."""
+    if list_name not in st.session_state.custom_lists:
+        return False
+    return any(game.get('id') == game_id for game in st.session_state.custom_lists[list_name])
+
+def create_favorite_button(game):
+    """Create a favorite button for a game."""
+    game_id = get_game_id(game)
+    is_favorited = is_game_favorited(game_id)
+    
+    button_text = "💙 Favorited" if is_favorited else "🤍 Add to Favorites"
+    button_style = "background-color: #e3f2fd;" if is_favorited else "background-color: #f5f5f5;"
+    
+    # Escape quotes in game name for JavaScript
+    escaped_name = game['Name'].replace("'", "\\'").replace('"', '\\"')
+    
+    return st.markdown(f"""
+    <button onclick="window.steamTracker.toggleFavorite({game_id}, '{escaped_name}'); this.innerHTML = this.innerHTML.includes('💙') ? '🤍 Add to Favorites' : '💙 Favorited'; this.style.backgroundColor = this.innerHTML.includes('💙') ? '#e3f2fd' : '#f5f5f5';" 
+            class="favorite-btn" 
+            data-game-id="{game_id}"
+            style="border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; {button_style} width: 100%;">
+        {button_text}
+    </button>
+    """, unsafe_allow_html=True)
+
+def create_list_management_buttons(game):
+    """Create buttons for adding/removing games from custom lists."""
+    game_id = get_game_id(game)
+    
+    # Get available lists
+    available_lists = list(st.session_state.custom_lists.keys())
+    
+    if available_lists:
+        # Dropdown to select list
+        selected_list = st.selectbox(
+            "Add to List:",
+            ["Select a list..."] + available_lists,
+            key=f"list_select_{game_id}"
+        )
+        
+        if selected_list != "Select a list...":
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button(f"➕ Add", key=f"add_to_list_{game_id}_{selected_list}"):
+                    if selected_list not in st.session_state.custom_lists:
+                        st.session_state.custom_lists[selected_list] = []
+                    
+                    if not is_game_in_list(game_id, selected_list):
+                        st.session_state.custom_lists[selected_list].append({
+                            'id': game_id,
+                            'name': game['Name'],
+                            'dateAdded': datetime.now().isoformat()
+                        })
+                        st.success(f"Added to {selected_list}!")
+                        st.rerun()
+                    else:
+                        st.warning("Already in this list!")
+            
+            with col2:
+                if is_game_in_list(game_id, selected_list):
+                    if st.button(f"➖ Remove", key=f"remove_from_list_{game_id}_{selected_list}"):
+                        st.session_state.custom_lists[selected_list] = [
+                            g for g in st.session_state.custom_lists[selected_list] 
+                            if g.get('id') != game_id
+                        ]
+                        st.success(f"Removed from {selected_list}!")
+                        st.rerun()
+
+def filter_by_favorites_and_lists(df, filter_type, selected_list=None):
+    """Filter dataframe by favorites or custom lists."""
+    if filter_type == "Favorites":
+        favorite_ids = [fav.get('id') for fav in st.session_state.favorites]
+        if favorite_ids:
+            game_ids = df.apply(get_game_id, axis=1)
+            return df[game_ids.isin(favorite_ids)]
+        else:
+            return pd.DataFrame()  # Empty if no favorites
+    
+    elif filter_type == "Custom List" and selected_list:
+        if selected_list in st.session_state.custom_lists:
+            list_game_ids = [game.get('id') for game in st.session_state.custom_lists[selected_list]]
+            if list_game_ids:
+                game_ids = df.apply(get_game_id, axis=1)
+                return df[game_ids.isin(list_game_ids)]
+        return pd.DataFrame()  # Empty if list doesn't exist or is empty
+    
+    return df  # Return original if "All"
+
+# === SMART CACHING FUNCTIONS ===
+
+def get_croatian_time():
+    """Get current time in Croatian timezone (CET/CEST)."""
+    # Croatian timezone is UTC+1 (CET) in winter, UTC+2 (CEST) in summer
+    # We'll use a simple approach with UTC offset
+    utc_now = datetime.now(timezone.utc)
+    
+    # Determine if it's daylight saving time (rough approximation)
+    # DST in Europe typically runs from last Sunday in March to last Sunday in October
+    year = utc_now.year
+    march_last_sunday = datetime(year, 3, 31) - timedelta(days=datetime(year, 3, 31).weekday() + 1 % 7)
+    october_last_sunday = datetime(year, 10, 31) - timedelta(days=datetime(year, 10, 31).weekday() + 1 % 7)
+    
+    # Simple DST check (not perfect but good enough)
+    if march_last_sunday <= utc_now.replace(tzinfo=None) < october_last_sunday:
+        croatia_offset = timedelta(hours=2)  # CEST (UTC+2)
+    else:
+        croatia_offset = timedelta(hours=1)   # CET (UTC+1)
+    
+    return utc_now + croatia_offset
+
+def should_update_cache():
+    """Check if we should update the cache based on Croatian time and last update."""
+    if 'last_cache_update' not in st.session_state:
+        return True
+    
+    croatia_time = get_croatian_time()
+    last_update = st.session_state.get('last_cache_update')
+    
+    if not last_update:
+        return True
+    
+    # Check if it's past 20:00 Croatian time and we haven't updated today
+    if croatia_time.hour >= 20:
+        # Check if last update was before today's 20:00
+        today_update_time = croatia_time.replace(hour=20, minute=0, second=0, microsecond=0)
+        if last_update < today_update_time:
+            return True
+    
+    return False
+
+def get_cache_key():
+    """Generate a cache key that changes daily at 20:00 Croatian time."""
+    croatia_time = get_croatian_time()
+    
+    # If it's before 20:00, use yesterday's date
+    # If it's after 20:00, use today's date
+    if croatia_time.hour >= 20:
+        cache_date = croatia_time.date()
+    else:
+        cache_date = (croatia_time - timedelta(days=1)).date()
+    
+    return f"steam_data_{cache_date}"
+
+def get_cached_data():
+    """Get cached data if available and valid."""
+    cache_key = get_cache_key()
+    
+    # Initialize cache storage if not exists
+    if 'data_cache' not in st.session_state:
+        st.session_state.data_cache = {}
+    
+    # Check if we have cached data for current cache key
+    if cache_key in st.session_state.data_cache:
+        cached_data = st.session_state.data_cache[cache_key]
+        return cached_data.get('data'), cached_data.get('timestamp')
+    
+    return None, None
+
+def set_cached_data(data):
+    """Store data in cache with current timestamp."""
+    cache_key = get_cache_key()
+    croatia_time = get_croatian_time()
+    
+    # Initialize cache storage if not exists
+    if 'data_cache' not in st.session_state:
+        st.session_state.data_cache = {}
+    
+    # Store data with timestamp
+    st.session_state.data_cache[cache_key] = {
+        'data': data,
+        'timestamp': croatia_time
+    }
+    
+    # Update last cache update timestamp
+    st.session_state.last_cache_update = croatia_time
+    
+    # Clean up old cache entries (keep only current and previous day)
+    keys_to_remove = []
+    for key in st.session_state.data_cache.keys():
+        if key != cache_key and not key.endswith(str((croatia_time - timedelta(days=1)).date())):
+            keys_to_remove.append(key)
+    
+    for key in keys_to_remove:
+        del st.session_state.data_cache[key]
+
+def load_steam_data() -> pd.DataFrame:
+    """Load Steam game data from Google Sheets with 24-hour Croatian time caching."""
+    # Check if we have valid cached data
+    cached_data, cache_timestamp = get_cached_data()
+    
+    if cached_data is not None and not should_update_cache():
+        # Return cached data if valid
+        return cached_data
+    
+    # If no cached data or cache expired, load fresh data
     try:
         # Fix for Streamlit Community Cloud - properly handle service account credentials
         
@@ -134,6 +508,10 @@ def load_steam_data():
             for field in ['Demo', 'IsDemo', 'IsComingSoon', 'IsPlaceholderDate']:
                 if field in df.columns:
                     df[field] = df[field].astype(str).str.lower().isin(['true','1','yes'])
+            
+            # Cache the successfully loaded data
+            set_cached_data(df)
+            
             return df
         except gspread.WorksheetNotFound:
             st.error("Steam_Master worksheet not found. Please run the data script first.")
@@ -143,6 +521,12 @@ def load_steam_data():
         # Show more detailed error information
         import traceback
         st.error(f"Detailed error: {traceback.format_exc()}")
+        
+        # Return cached data if available, even if it's older
+        if cached_data is not None:
+            st.warning("Using cached data due to loading error.")
+            return cached_data
+        
         return pd.DataFrame()
 
 def create_description_search_text(row):
@@ -575,9 +959,12 @@ def main():
     st.title("🎮 Steam Game Tracker")
     st.write("Discover new Steam games with detailed descriptions, trailers, and screenshots!")
     
-    # Initialize session state for infinite scroll
+    # Initialize session state for infinite scroll and favorites
     if 'games_shown' not in st.session_state:
         st.session_state.games_shown = 20
+    
+    # Initialize favorites state
+    init_favorites_state()
     
     # Load data
     df = load_steam_data()
@@ -588,6 +975,57 @@ def main():
     
     # Sidebar filters
     st.sidebar.header("🔍 Filters")
+    
+    # Favorites and Lists Management Section
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("⭐ Favorites & Lists")
+    
+    # List filter dropdown
+    list_filter_options = ["All", "Favorites"]
+    if st.session_state.custom_lists:
+        list_filter_options.extend(list(st.session_state.custom_lists.keys()))
+    
+    selected_list_filter = st.sidebar.selectbox(
+        "📋 Show List",
+        list_filter_options,
+        help="Filter by favorites or custom lists"
+    )
+    
+    # List management
+    with st.sidebar.expander("📝 Manage Lists", expanded=False):
+        st.write("**Create New List:**")
+        new_list_name = st.text_input("List Name", key="new_list_input")
+        if st.button("➕ Create List") and new_list_name.strip():
+            if new_list_name not in st.session_state.custom_lists:
+                st.session_state.custom_lists[new_list_name] = []
+                st.success(f"Created list: {new_list_name}")
+                st.rerun()
+            else:
+                st.warning("List already exists!")
+        
+        # Delete existing lists
+        if st.session_state.custom_lists:
+            st.write("**Delete Lists:**")
+            for list_name in list(st.session_state.custom_lists.keys()):
+                list_count = len(st.session_state.custom_lists[list_name])
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.write(f"{list_name} ({list_count} games)")
+                with col2:
+                    if st.button("🗑️", key=f"delete_{list_name}"):
+                        del st.session_state.custom_lists[list_name]
+                        st.success(f"Deleted {list_name}")
+                        st.rerun()
+    
+    # Display current favorites and lists stats
+    if st.session_state.favorites:
+        st.sidebar.write(f"⭐ **{len(st.session_state.favorites)} favorites**")
+    
+    if st.session_state.custom_lists:
+        for list_name, games in st.session_state.custom_lists.items():
+            st.sidebar.write(f"📋 **{list_name}**: {len(games)} games")
+    
+    st.sidebar.markdown("---")
     
     # Keyword search
     keyword_search = st.sidebar.text_input(
@@ -694,6 +1132,14 @@ def main():
         adult_mask = filtered_df.apply(lambda row: not is_adult_content(row), axis=1)
         filtered_df = filtered_df.loc[adult_mask].copy()
     
+    # Favorites and Lists filter
+    if selected_list_filter != "All":
+        if selected_list_filter == "Favorites":
+            filtered_df = filter_by_favorites_and_lists(filtered_df, "Favorites")
+        else:
+            # Custom list filter
+            filtered_df = filter_by_favorites_and_lists(filtered_df, "Custom List", selected_list_filter)
+    
     # Apply sorting
     if not filtered_df.empty:
         if sort_option == "Date Added (Newest First)":
@@ -710,7 +1156,7 @@ def main():
             status_order = {'released': 0, 'coming_soon': 1, 'distant_future': 2, 'unknown': 3}
             if 'ReleaseStatus' in filtered_df.columns:
                 filtered_df['_sort_order'] = filtered_df['ReleaseStatus'].apply(lambda x: status_order.get(x, 3))
-                filtered_df = filtered_df.sort_values(['_sort_order', 'Name'], ascending=[True, True])
+                filtered_df = filtered_df.sort_values(by=['_sort_order', 'Name'], ascending=[True, True])
                 filtered_df = filtered_df.drop('_sort_order', axis=1)
     
     # Display results
@@ -815,6 +1261,24 @@ def main():
                 
                 # Display real Steam Community Tags
                 display_game_tags(game)
+                
+                # Favorites and List Management
+                st.markdown("---")
+                fav_col, list_col = st.columns(2)
+                
+                with fav_col:
+                    create_favorite_button(game)
+                
+                with list_col:
+                    # Quick list management
+                    game_id = get_game_id(game)
+                    available_lists = list(st.session_state.custom_lists.keys())
+                    
+                    if available_lists:
+                        with st.expander("📝 Lists", expanded=False):
+                            create_list_management_buttons(game)
+                    else:
+                        st.caption("Create lists in sidebar to organize games")
                 
                 # Date information row (at the bottom)
                 date_parts = []
@@ -961,6 +1425,48 @@ def main():
                 st.write(f"- ✅ Requires ALL: {', '.join(selected_tags[:3])}{' (+more)' if len(selected_tags) > 3 else ''}")
             if excluded_tags:
                 st.write(f"- 🚫 Excludes ANY: {', '.join(excluded_tags[:3])}{' (+more)' if len(excluded_tags) > 3 else ''}")
+        
+        # Favorites and Lists breakdown
+        if st.session_state.favorites or st.session_state.custom_lists:
+            st.write("**⭐ Favorites & Lists:**")
+            if st.session_state.favorites:
+                st.write(f"- ⭐ Total Favorites: {len(st.session_state.favorites)}")
+            if st.session_state.custom_lists:
+                for list_name, games in st.session_state.custom_lists.items():
+                    st.write(f"- 📋 {list_name}: {len(games)} games")
+            if selected_list_filter != "All":
+                st.write(f"- 🔍 Currently showing: {selected_list_filter}")
+        
+        # Cache update schedule
+        st.markdown("---")
+        st.subheader("⏰ Cache Info")
+        croatia_time = get_croatian_time()
+        cache_key = get_cache_key()
+        
+        # Get current cache info
+        cached_data, cache_timestamp = get_cached_data()
+        
+        if croatia_time.hour >= 20:
+            next_cache_reset = "Tomorrow at 20:00 Croatian time"
+            hours_until_reset = 24 - croatia_time.hour + 20
+        else:
+            next_cache_reset = "Today at 20:00 Croatian time"
+            hours_until_reset = 20 - croatia_time.hour
+        
+        st.write(f"**Current Time (Croatia):** {croatia_time.strftime('%Y-%m-%d %H:%M')}")
+        st.write(f"**Cache Key:** {cache_key}")
+        st.write(f"**Next Cache Reset:** {next_cache_reset}")
+        st.write(f"**Hours Until Reset:** {hours_until_reset}")
+        
+        if cache_timestamp:
+            st.write(f"**Data Last Loaded:** {cache_timestamp.strftime('%Y-%m-%d %H:%M')}")
+            cache_age_hours = (croatia_time - cache_timestamp).total_seconds() / 3600
+            st.write(f"**Cache Age:** {cache_age_hours:.1f} hours")
+        else:
+            st.write("**Data Status:** Loading fresh data...")
+        
+        # Script update schedule info
+        st.write("**Script Updates Data:** 19:45 Croatian time daily")
         
         # Adult content breakdown
         if not df.empty:
