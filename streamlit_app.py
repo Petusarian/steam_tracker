@@ -4,6 +4,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import json
 import re
+import os
 from datetime import datetime, timezone, timedelta
 import logging
 import time
@@ -17,153 +18,7 @@ SERVICE_ACCOUNT_SCOPES = [
     'https://www.googleapis.com/auth/drive'
 ]
 
-# === FAVORITES & LISTS JAVASCRIPT ===
-def inject_favorites_js():
-    """Inject JavaScript for localStorage favorites and lists management."""
-    st.markdown("""
-    <script>
-    // Favorites and Lists Management
-    window.steamTracker = window.steamTracker || {};
-    
-    // Get favorites from localStorage
-    window.steamTracker.getFavorites = function() {
-        const favorites = localStorage.getItem('steamTracker_favorites');
-        return favorites ? JSON.parse(favorites) : [];
-    };
-    
-    // Set favorites to localStorage
-    window.steamTracker.setFavorites = function(favorites) {
-        localStorage.setItem('steamTracker_favorites', JSON.stringify(favorites));
-    };
-    
-    // Toggle favorite status
-    window.steamTracker.toggleFavorite = function(gameId, gameName) {
-        let favorites = window.steamTracker.getFavorites();
-        const index = favorites.findIndex(fav => fav.id === gameId);
-        
-        if (index === -1) {
-            favorites.push({ id: gameId, name: gameName, dateAdded: new Date().toISOString() });
-        } else {
-            favorites.splice(index, 1);
-        }
-        
-        window.steamTracker.setFavorites(favorites);
-        window.steamTracker.updateFavoriteButtons();
-        
-        // Trigger Streamlit rerun to update session state
-        window.parent.postMessage({
-            type: 'streamlit:setComponentValue',
-            value: { favorites: favorites }
-        }, '*');
-    };
-    
-    // Get custom lists from localStorage
-    window.steamTracker.getCustomLists = function() {
-        const lists = localStorage.getItem('steamTracker_customLists');
-        return lists ? JSON.parse(lists) : {};
-    };
-    
-    // Set custom lists to localStorage
-    window.steamTracker.setCustomLists = function(lists) {
-        localStorage.setItem('steamTracker_customLists', JSON.stringify(lists));
-    };
-    
-    // Add game to custom list
-    window.steamTracker.addToList = function(listName, gameId, gameName) {
-        let lists = window.steamTracker.getCustomLists();
-        if (!lists[listName]) {
-            lists[listName] = [];
-        }
-        
-        const index = lists[listName].findIndex(game => game.id === gameId);
-        if (index === -1) {
-            lists[listName].push({ id: gameId, name: gameName, dateAdded: new Date().toISOString() });
-            window.steamTracker.setCustomLists(lists);
-            
-            // Trigger Streamlit rerun
-            window.parent.postMessage({
-                type: 'streamlit:setComponentValue',
-                value: { customLists: lists }
-            }, '*');
-        }
-    };
-    
-    // Remove game from custom list
-    window.steamTracker.removeFromList = function(listName, gameId) {
-        let lists = window.steamTracker.getCustomLists();
-        if (lists[listName]) {
-            const index = lists[listName].findIndex(game => game.id === gameId);
-            if (index !== -1) {
-                lists[listName].splice(index, 1);
-                window.steamTracker.setCustomLists(lists);
-                
-                // Trigger Streamlit rerun
-                window.parent.postMessage({
-                    type: 'streamlit:setComponentValue',
-                    value: { customLists: lists }
-                }, '*');
-            }
-        }
-    };
-    
-    // Create new custom list
-    window.steamTracker.createList = function(listName) {
-        let lists = window.steamTracker.getCustomLists();
-        if (!lists[listName]) {
-            lists[listName] = [];
-            window.steamTracker.setCustomLists(lists);
-            
-            // Trigger Streamlit rerun
-            window.parent.postMessage({
-                type: 'streamlit:setComponentValue',
-                value: { customLists: lists }
-            }, '*');
-        }
-    };
-    
-    // Delete custom list
-    window.steamTracker.deleteList = function(listName) {
-        let lists = window.steamTracker.getCustomLists();
-        if (lists[listName]) {
-            delete lists[listName];
-            window.steamTracker.setCustomLists(lists);
-            
-            // Trigger Streamlit rerun
-            window.parent.postMessage({
-                type: 'streamlit:setComponentValue',
-                value: { customLists: lists }
-            }, '*');
-        }
-    };
-    
-    // Update favorite button appearances
-    window.steamTracker.updateFavoriteButtons = function() {
-        const favorites = window.steamTracker.getFavorites();
-        const favoriteIds = favorites.map(fav => fav.id);
-        
-        document.querySelectorAll('[data-game-id]').forEach(button => {
-            const gameId = parseInt(button.getAttribute('data-game-id'));
-            const isFavorite = favoriteIds.includes(gameId);
-            
-            if (button.classList.contains('favorite-btn')) {
-                button.innerHTML = isFavorite ? '💙 Favorited' : '🤍 Add to Favorites';
-                button.style.backgroundColor = isFavorite ? '#e3f2fd' : '#f5f5f5';
-            }
-        });
-    };
-    
-    // Initialize on page load
-    document.addEventListener('DOMContentLoaded', function() {
-        window.steamTracker.updateFavoriteButtons();
-    });
-    
-    // Update buttons when page changes
-    const observer = new MutationObserver(function(mutations) {
-        window.steamTracker.updateFavoriteButtons();
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
-    </script>
-    """, unsafe_allow_html=True)
+
 
 # === SETUP ===
 st.set_page_config(
@@ -172,9 +27,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Inject the favorites JavaScript
-inject_favorites_js()
 
 # Custom CSS for better media display and favorites
 st.markdown("""
@@ -214,13 +66,6 @@ st.markdown("""
     font-size: 0.8em;
     color: #666;
 }
-.favorite-btn {
-    transition: all 0.3s ease;
-}
-.favorite-btn:hover {
-    transform: scale(1.02);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -233,6 +78,77 @@ def init_favorites_state():
         st.session_state.custom_lists = {}
     if 'selected_list_filter' not in st.session_state:
         st.session_state.selected_list_filter = "All"
+
+def sync_with_localstorage():
+    """JavaScript to sync localStorage with Streamlit session state."""
+    return st.markdown("""
+    <script>
+    // Get data from localStorage and sync with Streamlit
+    function syncFromLocalStorage() {
+        try {
+            const favorites = localStorage.getItem('steamTracker_favorites');
+            const customLists = localStorage.getItem('steamTracker_customLists');
+            
+            if (favorites || customLists) {
+                // Create hidden input to pass data to Streamlit
+                let syncDiv = document.getElementById('localStorage-sync');
+                if (!syncDiv) {
+                    syncDiv = document.createElement('div');
+                    syncDiv.id = 'localStorage-sync';
+                    syncDiv.style.display = 'none';
+                    document.body.appendChild(syncDiv);
+                }
+                
+                syncDiv.setAttribute('data-favorites', favorites || '[]');
+                syncDiv.setAttribute('data-custom-lists', customLists || '{}');
+            }
+        } catch (e) {
+            console.log('LocalStorage sync error:', e);
+        }
+    }
+    
+    // Save data to localStorage
+    function saveToLocalStorage(favorites, customLists) {
+        try {
+            localStorage.setItem('steamTracker_favorites', JSON.stringify(favorites));
+            localStorage.setItem('steamTracker_customLists', JSON.stringify(customLists));
+        } catch (e) {
+            console.log('LocalStorage save error:', e);
+        }
+    }
+    
+    // Execute sync
+    syncFromLocalStorage();
+    
+    // Make save function globally available
+    window.saveToLocalStorage = saveToLocalStorage;
+    </script>
+    """, unsafe_allow_html=True)
+
+def get_localstorage_data():
+    """Try to get localStorage data via JavaScript."""
+    # The JavaScript sets data attributes on a hidden div
+    # This is a simple way to get localStorage data into Streamlit
+    sync_with_localstorage()
+    
+    # Check if we have stored data to load (only on first run)
+    if 'localStorage_loaded' not in st.session_state:
+        st.session_state.localStorage_loaded = True
+        # In a real implementation, we'd need a Streamlit component to properly bridge this
+        # For now, we'll use session state as the source of truth
+
+def save_to_localstorage():
+    """Save current session state to localStorage."""
+    st.markdown(f"""
+    <script>
+    if (window.saveToLocalStorage) {{
+        window.saveToLocalStorage(
+            {json.dumps(st.session_state.favorites)},
+            {json.dumps(st.session_state.custom_lists)}
+        );
+    }}
+    </script>
+    """, unsafe_allow_html=True)
 
 def get_game_id(game):
     """Get a unique ID for a game (using AppID or name as fallback)."""
@@ -258,19 +174,25 @@ def create_favorite_button(game):
     is_favorited = is_game_favorited(game_id)
     
     button_text = "💙 Favorited" if is_favorited else "🤍 Add to Favorites"
-    button_style = "background-color: #e3f2fd;" if is_favorited else "background-color: #f5f5f5;"
     
-    # Escape quotes in game name for JavaScript
-    escaped_name = game['Name'].replace("'", "\\'").replace('"', '\\"')
-    
-    return st.markdown(f"""
-    <button onclick="window.steamTracker.toggleFavorite({game_id}, '{escaped_name}'); this.innerHTML = this.innerHTML.includes('💙') ? '🤍 Add to Favorites' : '💙 Favorited'; this.style.backgroundColor = this.innerHTML.includes('💙') ? '#e3f2fd' : '#f5f5f5';" 
-            class="favorite-btn" 
-            data-game-id="{game_id}"
-            style="border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; {button_style} width: 100%;">
-        {button_text}
-    </button>
-    """, unsafe_allow_html=True)
+    if st.button(button_text, key=f"fav_btn_{game_id}", use_container_width=True):
+        if is_favorited:
+            # Remove from favorites
+            st.session_state.favorites = [
+                fav for fav in st.session_state.favorites 
+                if fav.get('id') != game_id
+            ]
+        else:
+            # Add to favorites
+            st.session_state.favorites.append({
+                'id': game_id,
+                'name': game['Name'],
+                'dateAdded': datetime.now().isoformat()
+            })
+        
+        # Save to localStorage
+        save_to_localstorage()
+        st.rerun()
 
 def create_list_management_buttons(game):
     """Create buttons for adding/removing games from custom lists."""
@@ -301,6 +223,7 @@ def create_list_management_buttons(game):
                             'name': game['Name'],
                             'dateAdded': datetime.now().isoformat()
                         })
+                        save_to_localstorage()  # Save to localStorage
                         st.success(f"Added to {selected_list}!")
                         st.rerun()
                     else:
@@ -313,6 +236,7 @@ def create_list_management_buttons(game):
                             g for g in st.session_state.custom_lists[selected_list] 
                             if g.get('id') != game_id
                         ]
+                        save_to_localstorage()  # Save to localStorage
                         st.success(f"Removed from {selected_list}!")
                         st.rerun()
 
@@ -966,6 +890,9 @@ def main():
     # Initialize favorites state
     init_favorites_state()
     
+    # Load localStorage data
+    get_localstorage_data()
+    
     # Load data
     df = load_steam_data()
     
@@ -998,6 +925,7 @@ def main():
         if st.button("➕ Create List") and new_list_name.strip():
             if new_list_name not in st.session_state.custom_lists:
                 st.session_state.custom_lists[new_list_name] = []
+                save_to_localstorage()  # Save to localStorage
                 st.success(f"Created list: {new_list_name}")
                 st.rerun()
             else:
@@ -1014,6 +942,7 @@ def main():
                 with col2:
                     if st.button("🗑️", key=f"delete_{list_name}"):
                         del st.session_state.custom_lists[list_name]
+                        save_to_localstorage()  # Save to localStorage
                         st.success(f"Deleted {list_name}")
                         st.rerun()
     
