@@ -1437,36 +1437,16 @@ def main():
             if selected_list_filter != "All":
                 st.write(f"- 🔍 Currently showing: {selected_list_filter}")
         
-        # Cache update schedule
+        # Update schedule
         st.markdown("---")
-        st.subheader("⏰ Cache Info")
         croatia_time = get_croatian_time()
-        cache_key = get_cache_key()
-        
-        # Get current cache info
-        cached_data, cache_timestamp = get_cached_data()
         
         if croatia_time.hour >= 20:
-            next_cache_reset = "Tomorrow at 20:00 Croatian time"
             hours_until_reset = 24 - croatia_time.hour + 20
         else:
-            next_cache_reset = "Today at 20:00 Croatian time"
             hours_until_reset = 20 - croatia_time.hour
         
-        st.write(f"**Current Time (Croatia):** {croatia_time.strftime('%Y-%m-%d %H:%M')}")
-        st.write(f"**Cache Key:** {cache_key}")
-        st.write(f"**Next Cache Reset:** {next_cache_reset}")
-        st.write(f"**Hours Until Reset:** {hours_until_reset}")
-        
-        if cache_timestamp:
-            st.write(f"**Data Last Loaded:** {cache_timestamp.strftime('%Y-%m-%d %H:%M')}")
-            cache_age_hours = (croatia_time - cache_timestamp).total_seconds() / 3600
-            st.write(f"**Cache Age:** {cache_age_hours:.1f} hours")
-        else:
-            st.write("**Data Status:** Loading fresh data...")
-        
-        # Script update schedule info
-        st.write("**Script Updates Data:** 19:45 Croatian time daily")
+        st.write(f"**⏰ Tracker updates in:** {hours_until_reset} hours")
         
         # Adult content breakdown
         if not df.empty:
