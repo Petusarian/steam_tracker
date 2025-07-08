@@ -1175,16 +1175,34 @@ def main():
     # Display games in compact view
     for _, game in page_df.iterrows():
         with st.container():
-            # 3-column layout optimized for medium resolutions: Main Image | Game Data | Media
-            img_col, data_col, media_col = st.columns([2, 3, 3], gap="medium")
+            # 3-column layout optimized for medium resolutions: Image+Favorites | Game Data | Media
+            img_col, data_col, media_col = st.columns([2.5, 3.5, 3], gap="medium")
             
-            # Column 1: Main Image
+            # Column 1: Main Image + Favorites/Lists
             with img_col:
                 header_image = game.get('HeaderImage')
                 if header_image is not None and str(header_image).strip():
                     st.image(str(header_image), use_container_width=True)
                 else:
                     st.write("🎮")  # Fallback icon
+                
+                # Favorites and List Management (moved here from middle column)
+                st.markdown("---")
+                fav_col, list_col = st.columns(2)
+                
+                with fav_col:
+                    create_favorite_button(game)
+                
+                with list_col:
+                    # Quick list management
+                    game_id = get_game_id(game)
+                    available_lists = list(st.session_state.custom_lists.keys())
+                    
+                    if available_lists:
+                        with st.expander("📝 Lists", expanded=False):
+                            create_list_management_buttons(game)
+                    else:
+                        st.caption("Create lists in sidebar")
             
             # Column 2: Game Data
             with data_col:
@@ -1261,24 +1279,6 @@ def main():
                 
                 # Display real Steam Community Tags
                 display_game_tags(game)
-                
-                # Favorites and List Management
-                st.markdown("---")
-                fav_col, list_col = st.columns(2)
-                
-                with fav_col:
-                    create_favorite_button(game)
-                
-                with list_col:
-                    # Quick list management
-                    game_id = get_game_id(game)
-                    available_lists = list(st.session_state.custom_lists.keys())
-                    
-                    if available_lists:
-                        with st.expander("📝 Lists", expanded=False):
-                            create_list_management_buttons(game)
-                    else:
-                        st.caption("Create lists in sidebar to organize games")
                 
                 # Date information row (at the bottom)
                 date_parts = []
@@ -1384,8 +1384,6 @@ def main():
                             st.info("No screenshots available")
                     except (json.JSONDecodeError, TypeError, IndexError):
                         st.info("No screenshots available")
-                
-                st.markdown("---")
     
     # "Load More" button at the bottom of the page content
     if st.session_state.games_shown < len(filtered_df):
