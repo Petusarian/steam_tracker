@@ -205,3 +205,18 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Steam Tracker - Private Data Files
+steam_games_data.csv
+steam_games_data.csv.backup
+*.csv.backup
+
+# Google Credentials (legacy)
+steamtracker.json
+youtube-data-search-*.json
+
+# Streamlit
+.streamlit/
+
+# Large data files
+steam_applist_snapshot.json
